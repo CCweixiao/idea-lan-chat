@@ -188,6 +188,7 @@ class LanChatService : Disposable {
             MessageType.FRIEND_RESPONSE -> handleFriendResponse(message)
             MessageType.GROUP_INVITE -> handleGroupInvite(message)
             MessageType.GROUP_INVITE_RESPONSE -> handleGroupInviteResponse(message)
+            MessageType.MESSAGE_READ_ACK -> handleMessageReadAck(message)
             else -> {
                 addMessageToHistory(message)
                 notifyMessageListeners(message)
@@ -212,6 +213,7 @@ class LanChatService : Disposable {
 
     fun markAsRead(chatId: String) {
         val userId = _currentUser?.id ?: return
+        val userName = _username
         val current = _unreadCounts.value.toMutableMap()
         if (current.containsKey(chatId) && current[chatId]!! > 0) {
             current[chatId] = 0
@@ -228,6 +230,84 @@ class LanChatService : Disposable {
                     }
                 }
             }
+            _messages.value = msgs
+            
+            // 如果是群聊，广播已读回执给其他成员
+            val group = _groups.value[chatId]
+            if (group != null) {
+                broadcastReadAck(chatId, userId, userName)
+            }
+        }
+    }
+
+    /**
+     * 已读回执数据
+     */
+    data class ReadAckPayload(
+        val groupId: String,
+        val messageId: String? = null,  // 如果为空，表示已读所有消息
+        val readerId: String,
+        val readerName: String
+    )
+
+    /**
+     * 广播已读回执给群成员
+     */
+    private fun broadcastReadAck(groupId: String, readerId: String, readerName: String) {
+        val payload = ReadAckPayload(
+            groupId = groupId,
+            readerId = readerId,
+            readerName = readerName
+        )
+        val msg = Message(
+            type = MessageType.MESSAGE_READ_ACK,
+            senderId = readerId,
+            receiverId = groupId,
+            content = gson.toJson(payload),
+            groupId = groupId,
+            senderName = readerName
+        )
+        scope.launch {
+            val targets = getGroupMemberTargets(groupId)
+            if (targets.isNotEmpty()) {
+                networkManager?.sendToMultiple(msg, targets)
+            }
+        }
+    }
+
+    /**
+     * 处理收到的已读回执
+     */
+    private fun handleMessageReadAck(message: Message) {
+        val payload = try {
+            gson.fromJson(message.content, ReadAckPayload::class.java)
+        } catch (_: Exception) { return }
+
+        val groupId = payload.groupId
+        val readerId = payload.readerId
+        val readerName = payload.readerName
+
+        // 更新该群聊中我发送的消息的已读状态
+        val myId = _currentUser?.id ?: return
+        val msgs = _messages.value.toMutableMap()
+        val groupMsgs = msgs[groupId] ?: return
+        var changed = false
+
+        groupMsgs.forEachIndexed { index, msg ->
+            // 只更新我发送的消息，且该用户还没被标记为已读
+            if (msg.senderId == myId && !msg.readByUserIds.contains(readerId)) {
+                val updated = msg.copy(
+                    readByUserIds = msg.readByUserIds + readerId,
+                    readByUserNames = msg.readByUserNames + readerName
+                )
+                groupMsgs[index] = updated
+                DatabaseManager.updateMessageReadBy(msg.id, readerId, readerName)
+                changed = true
+            }
+        }
+
+        if (changed) {
+            msgs[groupId] = groupMsgs
             _messages.value = msgs
         }
     }
@@ -386,13 +466,50 @@ class LanChatService : Disposable {
     fun getChatHistory(chatId: String): List<Message> = _messages.value[chatId] ?: emptyList()
 
     /**
-     * 清空聊天记录
+     * 清空指定聊天的聊天记录
      */
     fun clearChatHistory(chatId: String) {
         val currentMessages = _messages.value.toMutableMap()
         currentMessages.remove(chatId)
         _messages.value = currentMessages
         DatabaseManager.clearMessages(chatId)
+        
+        // 同时清除未读计数
+        val counts = _unreadCounts.value.toMutableMap()
+        counts.remove(chatId)
+        _unreadCounts.value = counts
+    }
+
+    /**
+     * 清空所有聊天记录
+     */
+    fun clearAllChatHistory() {
+        _messages.value = emptyMap()
+        _unreadCounts.value = emptyMap()
+        DatabaseManager.clearAllMessages()
+    }
+
+    /**
+     * 获取存储空间信息
+     */
+    fun getStorageInfo(): StorageInfo {
+        return StorageInfo(
+            databaseSize = DatabaseManager.getDatabaseSize(),
+            formattedSize = DatabaseManager.getFormattedDatabaseSize(),
+            messageStats = DatabaseManager.getMessageStats(),
+            totalChats = _messages.value.size
+        )
+    }
+
+    data class StorageInfo(
+        val databaseSize: Long,
+        val formattedSize: String,
+        val messageStats: Map<String, Int>,
+        val totalChats: Int
+    ) {
+        val totalMessages: Int get() = messageStats["total"] ?: 0
+        val imageCount: Int get() = messageStats["images"] ?: 0
+        val fileCount: Int get() = messageStats["files"] ?: 0
     }
 
     // =============== Group Management + Sync ===============

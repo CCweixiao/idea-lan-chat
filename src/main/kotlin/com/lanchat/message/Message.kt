@@ -17,7 +17,8 @@ enum class MessageType {
     FRIEND_REQUEST,
     FRIEND_RESPONSE,
     GROUP_INVITE,
-    GROUP_INVITE_RESPONSE
+    GROUP_INVITE_RESPONSE,
+    MESSAGE_READ_ACK    // 群消息已读回执
 }
 
 /**
@@ -38,7 +39,11 @@ data class Message(
     val mentionedUserIds: List<String> = emptyList(),  // 被@的用户ID列表
     val mentionAll: Boolean = false,                    // 是否@全体成员
     val groupId: String? = null,                        // 群组ID（群聊消息）
-    val senderName: String? = null                      // 发送者昵称（用于显示）
+    val senderName: String? = null,                     // 发送者昵称（用于显示）
+    
+    // 群消息已读回执
+    val readByUserIds: List<String> = emptyList(),      // 已读用户ID列表
+    val readByUserNames: List<String> = emptyList()     // 已读用户昵称列表（用于显示）
 ) {
     /**
      * 判断是否是自己发送的消息

@@ -187,6 +187,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             toolbarPanel.add(Box.createHorizontalStrut(4))
             toolbarPanel.add(createToolbarIcon(AllIcons.Actions.GroupByModule, "@成员") { showMentionDialog() })
         }
+        // 添加存储空间管理按钮
+        toolbarPanel.add(Box.createHorizontalStrut(8))
+        toolbarPanel.add(createToolbarIcon(AllIcons.General.Settings, "存储空间管理") { showStorageManager() })
         toolbarPanel.revalidate(); toolbarPanel.repaint()
     }
 
@@ -596,6 +599,16 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val textColor = JBColor(Color(30, 30, 30), Color(220, 220, 220))
         val hasMention = message.mentionAll || message.mentionedUserIds.isNotEmpty()
+        
+        // 已读状态信息
+        val hasReadStatus = isSentByMe && isGroupChat && message.readByUserNames.isNotEmpty()
+        val readStatusText = if (hasReadStatus) {
+            val names = message.readByUserNames
+            when {
+                names.size <= 3 -> "${names.joinToString("、")}已读"
+                else -> "${names.take(3).joinToString("、")}等${names.size}人已读"
+            }
+        } else null
 
         // Measure text to determine bubble width
         val fm = fontMetricsCache
@@ -671,13 +684,28 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
             add(contentPanel, BorderLayout.CENTER)
 
-            // Timestamp
-            add(JLabel(message.getFormattedTime()).apply {
-                font = TIME_FONT
-                foreground = if (isSentByMe) JBColor(Color(80, 120, 60), Color(100, 150, 80))
-                else JBColor(Color(170, 170, 170), Color(120, 120, 120))
-                horizontalAlignment = if (isSentByMe) SwingConstants.RIGHT else SwingConstants.LEFT
-            }, BorderLayout.SOUTH)
+            // 底部信息栏（时间 + 已读状态）
+            val bottomPanel = JPanel(BorderLayout(0, 2)).apply {
+                isOpaque = false
+                
+                // 时间
+                add(JLabel(message.getFormattedTime()).apply {
+                    font = TIME_FONT
+                    foreground = if (isSentByMe) JBColor(Color(80, 120, 60), Color(100, 150, 80))
+                    else JBColor(Color(170, 170, 170), Color(120, 120, 120))
+                    horizontalAlignment = SwingConstants.LEFT
+                }, BorderLayout.WEST)
+                
+                // 已读状态（群聊中自己发的消息）
+                if (readStatusText != null) {
+                    add(JLabel(readStatusText).apply {
+                        font = TIME_FONT
+                        foreground = JBColor(Color(100, 149, 237), Color(120, 160, 220))
+                        horizontalAlignment = SwingConstants.RIGHT
+                    }, BorderLayout.EAST)
+                }
+            }
+            add(bottomPanel, BorderLayout.SOUTH)
         }
 
         return JPanel(BorderLayout()).apply {
@@ -767,6 +795,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun showProfileDialog() { ProfileDialog(project).showAndGet() }
     private fun showGroupManageDialog() { currentGroup?.let { GroupManageDialog(project, it.id).show() } }
+    private fun showStorageManager() { StorageManagerDialog(project).isVisible = true }
 
     private fun clearChatDisplay() {
         titleLabel.text = ""; statusLabel.text = ""

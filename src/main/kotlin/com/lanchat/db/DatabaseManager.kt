@@ -146,6 +146,16 @@ object DatabaseManager {
                 stmt.executeUpdate("ALTER TABLE messages ADD COLUMN is_read INTEGER DEFAULT 0")
             }
         } catch (_: Exception) { }
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("ALTER TABLE messages ADD COLUMN read_by_user_ids TEXT DEFAULT '[]'")
+            }
+        } catch (_: Exception) { }
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("ALTER TABLE messages ADD COLUMN read_by_user_names TEXT DEFAULT '[]'")
+            }
+        } catch (_: Exception) { }
     }
 
     private fun executeUpdate(sql: String) {
@@ -257,8 +267,9 @@ object DatabaseManager {
             val sql = """
                 INSERT OR REPLACE INTO messages 
                 (id, type, sender_id, receiver_id, content, file_path, timestamp, 
-                 sender_name, mentioned_user_ids, mention_all, group_id, is_read) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 sender_name, mentioned_user_ids, mention_all, group_id, is_read, 
+                 read_by_user_ids, read_by_user_names) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
                 stmt.setString(1, message.id); stmt.setString(2, message.type.name)
@@ -269,7 +280,51 @@ object DatabaseManager {
                 stmt.setInt(10, if (message.mentionAll) 1 else 0)
                 stmt.setString(11, message.groupId)
                 stmt.setInt(12, if (message.isRead) 1 else 0)
+                stmt.setString(13, gson.toJson(message.readByUserIds))
+                stmt.setString(14, gson.toJson(message.readByUserNames))
                 stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    /**
+     * 更新消息的已读用户列表
+     */
+    fun updateMessageReadBy(messageId: String, userId: String, userName: String) {
+        try {
+            // 先获取当前已读列表
+            val sql = "SELECT read_by_user_ids, read_by_user_names FROM messages WHERE id = ?"
+            connection?.prepareStatement(sql)?.use { stmt ->
+                stmt.setString(1, messageId)
+                stmt.executeQuery()?.use { rs ->
+                    if (rs.next()) {
+                        val readByIds: MutableList<String> = try {
+                            gson.fromJson(rs.getString("read_by_user_ids"),
+                                object : TypeToken<MutableList<String>>() {}.type) ?: mutableListOf()
+                        } catch (_: Exception) { mutableListOf() }
+                        
+                        val readByNames: MutableList<String> = try {
+                            gson.fromJson(rs.getString("read_by_user_names"),
+                                object : TypeToken<MutableList<String>>() {}.type) ?: mutableListOf()
+                        } catch (_: Exception) { mutableListOf() }
+                        
+                        // 添加新用户（如果不存在）
+                        if (!readByIds.contains(userId)) {
+                            readByIds.add(userId)
+                            readByNames.add(userName)
+                            
+                            // 更新数据库
+                            connection?.prepareStatement(
+                                "UPDATE messages SET read_by_user_ids = ?, read_by_user_names = ? WHERE id = ?"
+                            )?.use { updateStmt ->
+                                updateStmt.setString(1, gson.toJson(readByIds))
+                                updateStmt.setString(2, gson.toJson(readByNames))
+                                updateStmt.setString(3, messageId)
+                                updateStmt.executeUpdate()
+                            }
+                        }
+                    }
+                }
             }
         } catch (e: Exception) { e.printStackTrace() }
     }
@@ -347,6 +402,16 @@ object DatabaseManager {
                         } catch (_: Exception) { emptyList() }
 
                         val isRead = try { rs.getInt("is_read") == 1 } catch (_: Exception) { false }
+                        
+                        val readByIds: List<String> = try {
+                            gson.fromJson(rs.getString("read_by_user_ids"),
+                                object : TypeToken<List<String>>() {}.type) ?: emptyList()
+                        } catch (_: Exception) { emptyList() }
+                        
+                        val readByNames: List<String> = try {
+                            gson.fromJson(rs.getString("read_by_user_names"),
+                                object : TypeToken<List<String>>() {}.type) ?: emptyList()
+                        } catch (_: Exception) { emptyList() }
 
                         val message = Message(
                             id = rs.getString("id"),
@@ -360,7 +425,9 @@ object DatabaseManager {
                             senderName = rs.getString("sender_name"),
                             mentionedUserIds = mentionedIds,
                             mentionAll = rs.getInt("mention_all") == 1,
-                            groupId = rs.getString("group_id")
+                            groupId = rs.getString("group_id"),
+                            readByUserIds = readByIds,
+                            readByUserNames = readByNames
                         )
 
                         val chatId = if (!message.groupId.isNullOrEmpty()) {
@@ -588,5 +655,54 @@ object DatabaseManager {
     fun close() {
         connection?.close()
         connection = null
+    }
+
+    // =============== Storage Info ===============
+
+    /**
+     * 获取数据库文件大小（字节）
+     */
+    fun getDatabaseSize(): Long {
+        return try {
+            File(dbPath).length()
+        } catch (_: Exception) { 0L }
+    }
+
+    /**
+     * 获取格式化的数据库大小
+     */
+    fun getFormattedDatabaseSize(): String {
+        val size = getDatabaseSize()
+        return when {
+            size < 1024 -> "$size B"
+            size < 1024 * 1024 -> String.format("%.1f KB", size / 1024.0)
+            size < 1024 * 1024 * 1024 -> String.format("%.1f MB", size / (1024.0 * 1024))
+            else -> String.format("%.1f GB", size / (1024.0 * 1024 * 1024))
+        }
+    }
+
+    /**
+     * 获取消息数量统计
+     */
+    fun getMessageStats(): Map<String, Int> {
+        val stats = mutableMapOf<String, Int>()
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeQuery("SELECT COUNT(*) as total FROM messages")?.use { rs ->
+                    if (rs.next()) stats["total"] = rs.getInt("total")
+                }
+            }
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeQuery("SELECT COUNT(*) as total FROM messages WHERE type = 'IMAGE'")?.use { rs ->
+                    if (rs.next()) stats["images"] = rs.getInt("total")
+                }
+            }
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeQuery("SELECT COUNT(*) as total FROM messages WHERE type = 'FILE'")?.use { rs ->
+                    if (rs.next()) stats["files"] = rs.getInt("total")
+                }
+            }
+        } catch (_: Exception) { }
+        return stats
     }
 }

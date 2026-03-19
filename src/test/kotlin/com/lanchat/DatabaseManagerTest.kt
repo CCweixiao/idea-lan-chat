@@ -130,6 +130,56 @@ class DatabaseManagerTest {
     }
     
     @Test
+    fun `test message read status`() {
+        val message = Message(
+            id = "msg_read_1",
+            type = MessageType.GROUP_CHAT,
+            senderId = "sender_1",
+            receiverId = "group_1",
+            content = "群消息测试",
+            timestamp = System.currentTimeMillis(),
+            senderName = "发送者",
+            groupId = "group_1",
+            readByUserIds = listOf("user_1"),
+            readByUserNames = listOf("张三")
+        )
+        
+        DatabaseManager.saveMessage(message)
+        
+        val loadedMessages = DatabaseManager.loadMessages("sender_1")
+        val loadedMessage = loadedMessages["group_1"]!![0]
+        
+        assertEquals(1, loadedMessage.readByUserIds.size)
+        assertTrue(loadedMessage.readByUserIds.contains("user_1"))
+        assertEquals("张三", loadedMessage.readByUserNames[0])
+    }
+    
+    @Test
+    fun `test update message read by`() {
+        val message = Message(
+            id = "msg_read_update",
+            type = MessageType.GROUP_CHAT,
+            senderId = "sender_1",
+            receiverId = "group_1",
+            content = "测试更新已读状态",
+            timestamp = System.currentTimeMillis(),
+            senderName = "发送者",
+            groupId = "group_1"
+        )
+        
+        DatabaseManager.saveMessage(message)
+        
+        // 更新已读状态
+        DatabaseManager.updateMessageReadBy("msg_read_update", "user_1", "张三")
+        
+        val loadedMessages = DatabaseManager.loadMessages("sender_1")
+        val loadedMessage = loadedMessages["group_1"]!!.find { it.id == "msg_read_update" }!!
+        
+        assertTrue(loadedMessage.readByUserIds.contains("user_1"))
+        assertTrue(loadedMessage.readByUserNames.contains("张三"))
+    }
+    
+    @Test
     fun `test message with mention`() {
         val message = Message(
             id = "msg_2",
