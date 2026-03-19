@@ -1,50 +1,55 @@
 <idea-plugin>
     <id>com.lanchat.idea-lan-chat</id>
     <name>LAN Chat</name>
-    <vendor email="jielongping@example.com" url="https://github.com/jielongping/idea-lan-chat">Jie Longping</vendor>
+    <vendor email="liuyifei@example.com" url="https://github.com/CCweixiao/idea-lan-chat">liuyifei</vendor>
 
     <description><![CDATA[
-    <h1>LAN Chat - IntelliJ IDEA局域网聊天插件</h1>
-    <p>一个专为开发者设计的局域网聊天插件，支持同事之间的即时通讯，让你在编码时也能轻松摸鱼聊天！</p>
-    <h2>功能特性</h2>
+    <h2>🚀 LAN Chat - 局域网即时通讯工具</h2>
+    
+    <p><b>急！需求沟通到一半，企微遭遇外星人攻击，无法发送消息...</b></p>
+    <p><b>幸好我有 LAN Chat！助我工作效率倍增，永不掉线！</b></p>
+    
+    <h3>✨ 核心特性</h3>
     <ul>
-        <li>✅ 局域网自动发现同事</li>
-        <li>✅ 即时消息发送</li>
-        <li>✅ 图片发送与预览</li>
-        <li>✅ 文件传输</li>
-        <li>✅ 联系人列表管理</li>
-        <li>✅ 创建群聊</li>
-        <li>✅ 优雅的聊天界面</li>
+        <li>🌐 <b>自动发现</b> - 自动扫描局域网内在线同事</li>
+        <li>💬 <b>即时通讯</b> - 文本、图片、文件一键发送</li>
+        <li>👥 <b>群组聊天</b> - 创建群聊，团队协作更高效</li>
+        <li>🔒 <b>安全可靠</b> - 局域网内点对点传输，数据不外泄</li>
+        <li>⚡ <b>轻量高效</b> - 极低资源占用，编码聊天两不误</li>
     </ul>
+    
+    <h3>🎯 适用场景</h3>
+    <ul>
+        <li>企业内网环境下的团队协作</li>
+        <li>远程办公时的快速沟通</li>
+        <li>临时网络故障时的备用通讯方案</li>
+    </ul>
+    
+    <p><i>💡 提示：插件启动后会自动扫描局域网内的在线用户</i></p>
     ]]></description>
 
     <change-notes><![CDATA[
-    <h2>1.0.0</h2>
+    <h2>1.0.2</h2>
     <ul>
-        <li>初始版本发布</li>
-        <li>支持局域网用户发现</li>
-        <li>支持文字消息发送</li>
-        <li>支持图片和文件传输</li>
-        <li>支持联系人管理</li>
-        <li>支持群聊功能</li>
+        <li>🎨 优化聊天界面，新增输入框</li>
+        <li>🔍 新增局域网IP显示</li>
+        <li>👤 支持手动添加联系人</li>
+        <li>🖼️ 更换插件图标</li>
+        <li>💎 美化发送按钮</li>
     </ul>
     ]]></change-notes>
 
-    <!-- please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html on how to target different products -->
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- 工具窗口 -->
         <toolWindow id="LAN Chat"
-                    icon="/META-INF/icons/chat.svg"
+                    icon="/META-INF/icons/avatar.svg"
                     anchor="right"
                     secondary="true"
                     factoryClass="com.lanchat.ui.LanChatToolWindowFactory"/>
         
-        <!-- 应用服务 -->
         <applicationService serviceImplementation="com.lanchat.LanChatService"/>
         
-        <!-- 配置 -->
         <applicationConfigurable parentId="tools"
                                  instance="com.lanchat.ui.settings.LanChatSettingsConfigurable"
                                  id="com.lanchat.settings"
@@ -52,7 +57,6 @@
     </extensions>
 
     <actions>
-        <!-- 操作定义 -->
         <action id="com.lanchat.SendFileAction"
                 class="com.lanchat.ui.actions.SendFileAction"
                 text="Send File"

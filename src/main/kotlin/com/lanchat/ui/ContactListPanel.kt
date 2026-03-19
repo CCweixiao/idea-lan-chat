@@ -2,6 +2,7 @@ package com.lanchat.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
@@ -18,13 +19,14 @@ import javax.swing.*
 /**
  * 联系人列表面板
  */
-class ContactListPanel(private val project: Project) : JPanel(BorderLayout()) {
+class ContactListPanel(private val project: Project, private val onPeerSelected: (Peer?) -> Unit) : JPanel(BorderLayout()) {
     
     private val service = LanChatService.getInstance()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val listModel = DefaultListModel<Peer>()
     private val contactList = JBList(listModel)
     private var selectedPeer: Peer? = null
+    private val statusLabel = JLabel()
     
     init {
         setupUI()
@@ -33,68 +35,89 @@ class ContactListPanel(private val project: Project) : JPanel(BorderLayout()) {
     
     private fun setupUI() {
         // 顶部工具栏
-        val toolbar = JPanel(BorderLayout()).apply {
-            background = JBColor.PanelBackground
-            border = JBUI.Borders.empty(8)
-            
-            add(JLabel("联系人").apply {
-                font = font.deriveFont(Font.BOLD, 14f)
-            }, BorderLayout.WEST)
-            
-            add(createToolbarButtons(), BorderLayout.EAST)
-        }
+        val toolbar = JPanel(BorderLayout())
+        toolbar.background = JBColor.PanelBackground
+        toolbar.border = JBUI.Borders.empty(8)
+        
+        // 标题
+        val titlePanel = JPanel(BorderLayout())
+        titlePanel.isOpaque = false
+        
+        val titleLabel = JLabel("联系人")
+        titleLabel.font = Font("Microsoft YaHei", Font.BOLD, 14)
+        titlePanel.add(titleLabel, BorderLayout.NORTH)
+        
+        // 显示本机IP
+        val ipLabel = JLabel("本机: ${service.localIp}")
+        ipLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11)
+        ipLabel.foreground = JBColor.GRAY
+        titlePanel.add(ipLabel, BorderLayout.SOUTH)
+        
+        toolbar.add(titlePanel, BorderLayout.WEST)
+        toolbar.add(createToolbarButtons(), BorderLayout.EAST)
         
         add(toolbar, BorderLayout.NORTH)
         
         // 联系人列表
         contactList.cellRenderer = ContactListCellRenderer()
         contactList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        contactList.background = JBColor.PanelBackground
+        
         contactList.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) {
                 selectedPeer = contactList.selectedValue
-                // 通知聊天面板切换对话
-                selectedPeer?.let {
-                    // 切换聊天对象
-                }
+                onPeerSelected(selectedPeer)
             }
         }
         
-        // 双击打开聊天
         contactList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.clickCount == 2) {
-                    // 打开聊天窗口
+                    // 双击打开聊天
                 }
             }
         })
         
-        val scrollPane = JBScrollPane(contactList).apply {
-            border = JBUI.Borders.empty()
-        }
-        
+        val scrollPane = JBScrollPane(contactList)
+        scrollPane.border = JBUI.Borders.empty()
         add(scrollPane, BorderLayout.CENTER)
         
         // 底部状态栏
-        val statusBar = JPanel(FlowLayout(FlowLayout.LEFT)).apply {
-            background = JBColor.PanelBackground
-            border = JBUI.Borders.emptyTop(4)
-            add(JLabel("在线: ${listModel.size()} 人").apply {
-                foreground = JBColor.GRAY
-            })
-        }
+        val statusBar = JPanel(FlowLayout(FlowLayout.LEFT))
+        statusBar.background = JBColor.PanelBackground
+        statusBar.border = JBUI.Borders.empty(4, 8)
+        
+        statusLabel.text = "在线: 0 人"
+        statusLabel.foreground = JBColor.GRAY
+        statusLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11)
+        statusBar.add(statusLabel)
         
         add(statusBar, BorderLayout.SOUTH)
     }
     
     private fun createToolbarButtons(): JPanel {
-        return JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+        return JPanel(FlowLayout(FlowLayout.RIGHT, 2, 0)).apply {
+            isOpaque = false
+            
             // 创建群聊按钮
             add(JButton(AllIcons.Actions.AddMulticaret).apply {
                 toolTipText = "创建群聊"
                 isBorderPainted = false
                 isContentAreaFilled = false
+                margin = Insets(4, 4, 4, 4)
                 addActionListener {
                     showCreateGroupDialog()
+                }
+            })
+            
+            // 添加联系人按钮
+            add(JButton(AllIcons.General.Add).apply {
+                toolTipText = "添加联系人"
+                isBorderPainted = false
+                isContentAreaFilled = false
+                margin = Insets(4, 4, 4, 4)
+                addActionListener {
+                    showAddContactDialog()
                 }
             })
             
@@ -103,20 +126,70 @@ class ContactListPanel(private val project: Project) : JPanel(BorderLayout()) {
                 toolTipText = "刷新联系人"
                 isBorderPainted = false
                 isContentAreaFilled = false
+                margin = Insets(4, 4, 4, 4)
                 addActionListener {
-                    // 刷新联系人列表
+                    service.refreshPeers()
                 }
             })
         }
     }
     
+    private fun showAddContactDialog() {
+        val ipField = JTextField(15)
+        val portField = JTextField("8889", 6)
+        val nameField = JTextField(15)
+        
+        val panel = JPanel(GridBagLayout())
+        val gbc = GridBagConstraints()
+        gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.insets = Insets(4, 4, 4, 4)
+        
+        gbc.gridx = 0; gbc.gridy = 0
+        panel.add(JLabel("IP地址:"), gbc)
+        gbc.gridx = 1
+        panel.add(ipField, gbc)
+        
+        gbc.gridx = 0; gbc.gridy = 1
+        panel.add(JLabel("端口:"), gbc)
+        gbc.gridx = 1
+        panel.add(portField, gbc)
+        
+        gbc.gridx = 0; gbc.gridy = 2
+        panel.add(JLabel("昵称:"), gbc)
+        gbc.gridx = 1
+        panel.add(nameField, gbc)
+        
+        val result = Messages.showOkCancelDialog(
+            panel,
+            "添加联系人",
+            "LAN Chat",
+            "确定",
+            "取消",
+            AllIcons.General.Add
+        )
+        
+        if (result == Messages.OK) {
+            val ip = ipField.text.trim()
+            val port = portField.text.trim().toIntOrNull() ?: 8889
+            val name = nameField.text.trim().ifEmpty { "匿名用户" }
+            
+            if (ip.isNotEmpty()) {
+                service.addManualPeer(ip, port, name)
+            }
+        }
+    }
+    
     private fun showCreateGroupDialog() {
         val availablePeers = listModel.elements().toList()
+        if (availablePeers.isEmpty()) {
+            Messages.showInfoMessage("暂无联系人，请先添加联系人", "提示")
+            return
+        }
+        
         val dialog = CreateGroupDialog(project, availablePeers)
         if (dialog.showAndGet()) {
             val selectedPeers = dialog.selectedPeers
             val groupName = dialog.groupName
-            // 创建群聊
             service.createGroup(groupName, selectedPeers.map { it.id })
         }
     }
@@ -129,6 +202,7 @@ class ContactListPanel(private val project: Project) : JPanel(BorderLayout()) {
                     peers.values.sortedByDescending { it.isOnline }.forEach { peer ->
                         listModel.addElement(peer)
                     }
+                    statusLabel.text = "在线: ${peers.size} 人"
                 }
             }
         }
@@ -139,25 +213,27 @@ class ContactListPanel(private val project: Project) : JPanel(BorderLayout()) {
      */
     private class ContactListCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Peer> {
         private val nameLabel = JLabel()
-        private val statusLabel = JLabel()
-        private val avatarLabel = JLabel()
+        private val ipLabel = JLabel()
+        private val statusIcon = JLabel()
         
         init {
             border = JBUI.Borders.empty(8, 12)
             background = JBColor.PanelBackground
             
-            val infoPanel = JPanel(BorderLayout()).apply {
-                isOpaque = false
-                add(nameLabel.apply {
-                    font = font.deriveFont(Font.PLAIN, 13f)
-                }, BorderLayout.NORTH)
-                add(statusLabel.apply {
-                    font = font.deriveFont(Font.PLAIN, 11f)
-                    foreground = JBColor.GRAY
-                }, BorderLayout.SOUTH)
-            }
+            val infoPanel = JPanel(BorderLayout())
+            infoPanel.isOpaque = false
             
-            add(avatarLabel, BorderLayout.WEST)
+            nameLabel.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            infoPanel.add(nameLabel, BorderLayout.NORTH)
+            
+            ipLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11)
+            ipLabel.foreground = JBColor.GRAY
+            infoPanel.add(ipLabel, BorderLayout.SOUTH)
+            
+            statusIcon.horizontalAlignment = SwingConstants.CENTER
+            statusIcon.preferredSize = Dimension(32, 32)
+            
+            add(statusIcon, BorderLayout.WEST)
             add(infoPanel, BorderLayout.CENTER)
         }
         
@@ -169,23 +245,26 @@ class ContactListPanel(private val project: Project) : JPanel(BorderLayout()) {
             cellHasFocus: Boolean
         ): JPanel {
             nameLabel.text = peer.username
-            statusLabel.text = if (peer.isOnline) "在线" else "离线"
+            ipLabel.text = "${peer.ipAddress}:${peer.port}"
             
-            // 头像
-            avatarLabel.text = peer.username.firstOrNull()?.uppercase() ?: "?"
-            avatarLabel.font = avatarLabel.font.deriveFont(Font.BOLD, 16f)
-            avatarLabel.horizontalAlignment = SwingConstants.CENTER
-            avatarLabel.preferredSize = Dimension(32, 32)
+            // 状态图标
+            if (peer.isOnline) {
+                statusIcon.text = "●"
+                statusIcon.foreground = Color(76, 175, 80)
+            } else {
+                statusIcon.text = "○"
+                statusIcon.foreground = JBColor.GRAY
+            }
+            
+            statusIcon.font = Font("Microsoft YaHei", Font.BOLD, 20)
             
             // 选中状态
-            background = if (isSelected) JBColor(LightGray, DarkGray) else JBColor.PanelBackground
+            background = if (isSelected) 
+                JBColor(Color(230, 230, 230), Color(70, 70, 70))
+            else 
+                JBColor.PanelBackground
             
             return this
-        }
-        
-        companion object {
-            private val LightGray = Color(230, 230, 230)
-            private val DarkGray = Color(70, 70, 70)
         }
     }
 }

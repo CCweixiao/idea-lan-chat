@@ -41,40 +41,27 @@ class NetworkManager {
     val messageReceived: SharedFlow<Message> = _messageReceived.asSharedFlow()
     
     // 当前用户ID
-    private var currentUserId: String = UUID.randomUUID().toString()
+    var currentUserId: String = UUID.randomUUID().toString()
+        private set
     private var currentUsername: String = "Anonymous"
     private var isRunning = false
     
     companion object {
-        private const val DISCOVERY_INTERVAL = 5000L // 5秒广播一次
-        private const val DISCOVERY_TIMEOUT = 15000L // 15秒超时
+        private const val DISCOVERY_INTERVAL = 5000L
+        private const val DISCOVERY_TIMEOUT = 15000L
     }
     
-    /**
-     * 启动网络服务
-     */
     fun start(username: String) {
         currentUsername = username
         isRunning = true
         
-        // 获取本机IP
-        val localIp = getLocalIpAddress()
-        
         scope.launch {
-            // 启动UDP广播监听
             startUdpListener()
-            
-            // 启动TCP服务端
             startTcpServer()
-            
-            // 启动广播发现
             startDiscovery()
         }
     }
     
-    /**
-     * 启动UDP监听
-     */
     private fun startUdpListener() {
         udpSocket = DatagramSocket(udpPort)
         udpSocket?.broadcast = true
@@ -89,7 +76,6 @@ class NetworkManager {
                     val json = String(packet.data, 0, packet.length)
                     val discoveryMsg = gson.fromJson(json, DiscoveryMessage::class.java)
                     
-                    // 忽略自己的广播
                     if (discoveryMsg.userId != currentUserId) {
                         val peer = Peer(
                             id = discoveryMsg.userId,
@@ -107,9 +93,6 @@ class NetworkManager {
         }
     }
     
-    /**
-     * 启动TCP服务端
-     */
     private fun startTcpServer() {
         serverSocket = ServerSocket(tcpPort)
         
@@ -125,9 +108,6 @@ class NetworkManager {
         }
     }
     
-    /**
-     * 处理客户端连接
-     */
     private fun handleClientConnection(socket: Socket) {
         scope.launch {
             try {
@@ -145,24 +125,11 @@ class NetworkManager {
         }
     }
     
-    /**
-     * 启动广播发现
-     */
     private fun startDiscovery() {
         scope.launch {
             while (isRunning) {
                 try {
-                    val discoveryMsg = DiscoveryMessage(
-                        userId = currentUserId,
-                        username = currentUsername,
-                        tcpPort = tcpPort
-                    )
-                    val json = gson.toJson(discoveryMsg)
-                    val data = json.toByteArray()
-                    
-                    val packet = DatagramPacket(data, data.size, broadcastAddress, udpPort)
-                    udpSocket?.send(packet)
-                    
+                    sendDiscoveryInternal()
                     delay(DISCOVERY_INTERVAL)
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -171,16 +138,28 @@ class NetworkManager {
         }
     }
     
-    /**
-     * 发送消息
-     */
+    private suspend fun sendDiscoveryInternal() {
+        try {
+            val discoveryMsg = DiscoveryMessage(
+                userId = currentUserId,
+                username = currentUsername,
+                tcpPort = tcpPort
+            )
+            val json = gson.toJson(discoveryMsg)
+            val data = json.toByteArray()
+            
+            val packet = DatagramPacket(data, data.size, broadcastAddress, udpPort)
+            udpSocket?.send(packet)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    
     suspend fun sendMessage(message: Message) {
-        val peerIp = message.receiverId // 这里需要从peers获取IP
         val json = gson.toJson(message)
         
         withContext(Dispatchers.IO) {
             try {
-                // 这里简化处理，实际需要根据peerId获取对应的IP和端口
                 val socket = Socket("127.0.0.1", tcpPort)
                 socket.outputStream.write("$json\n".toByteArray())
                 socket.outputStream.flush()
@@ -191,45 +170,16 @@ class NetworkManager {
         }
     }
     
-    /**
-     * 发送文件
-     */
-    suspend fun sendFile(peerId: String, filePath: String) {
-        // 实现文件传输逻辑
-    }
-    
-    /**
-     * 更新用户名
-     */
     fun updateUsername(newUsername: String) {
         currentUsername = newUsername
     }
     
-    /**
-     * 获取本机IP地址
-     */
-    private fun getLocalIpAddress(): String {
-        return try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            while (interfaces.hasMoreElements()) {
-                val networkInterface = interfaces.nextElement()
-                val addresses = networkInterface.inetAddresses
-                while (addresses.hasMoreElements()) {
-                    val address = addresses.nextElement()
-                    if (!address.isLoopbackAddress && address is Inet4Address) {
-                        return address.hostAddress ?: "127.0.0.1"
-                    }
-                }
-            }
-            "127.0.0.1"
-        } catch (e: Exception) {
-            "127.0.0.1"
+    fun sendDiscovery() {
+        scope.launch {
+            sendDiscoveryInternal()
         }
     }
     
-    /**
-     * 停止网络服务
-     */
     fun stop() {
         isRunning = false
         udpSocket?.close()

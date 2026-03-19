@@ -2,6 +2,7 @@ package com.lanchat.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
@@ -15,6 +16,7 @@ import java.awt.event.KeyEvent
 import java.io.File
 import javax.swing.*
 import javax.swing.border.EmptyBorder
+import javax.swing.border.LineBorder
 
 /**
  * 聊天面板
@@ -25,8 +27,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     
     private val messagePanel = JPanel()
     private val messageScrollPane: JBScrollPane
-    private val inputArea = JTextArea(3, 0)
+    private val inputArea = JTextArea(3, 30)
     private var currentPeer: Peer? = null
+    private val peerIpLabel = JLabel()
     
     init {
         messagePanel.layout = BoxLayout(messagePanel, BoxLayout.Y_AXIS)
@@ -41,6 +44,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         inputArea.lineWrap = true
         inputArea.wrapStyleWord = true
         inputArea.border = EmptyBorder(8, 8, 8, 8)
+        inputArea.font = Font("Microsoft YaHei", Font.PLAIN, 14)
         
         setupUI()
     }
@@ -57,12 +61,30 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         header.background = JBColor.PanelBackground
         header.border = JBUI.Borders.empty(12)
         
-        val userInfo = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0))
+        // 左侧：用户信息和本机IP
+        val userInfo = JPanel(BorderLayout())
         userInfo.isOpaque = false
-        val label = JLabel("选择联系人开始聊天")
-        label.font = label.font.deriveFont(Font.BOLD, 14f)
-        userInfo.add(label)
+        
+        val titleLabel = JLabel("LAN Chat 💬")
+        titleLabel.font = titleLabel.font.deriveFont(Font.BOLD, 16f)
+        userInfo.add(titleLabel, BorderLayout.NORTH)
+        
+        // 显示本机IP
+        val ipPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+        ipPanel.isOpaque = false
+        ipPanel.add(JLabel("本机IP:").apply { foreground = JBColor.GRAY })
+        peerIpLabel.text = service.localIp
+        peerIpLabel.foreground = JBColor(Color(0, 122, 255), Color(100, 150, 255))
+        peerIpLabel.font = peerIpLabel.font.deriveFont(Font.BOLD, 12f)
+        ipPanel.add(peerIpLabel)
+        userInfo.add(ipPanel, BorderLayout.SOUTH)
+        
         header.add(userInfo, BorderLayout.WEST)
+        
+        // 右侧：当前聊天对象信息
+        val peerInfo = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0))
+        peerInfo.isOpaque = false
+        header.add(peerInfo, BorderLayout.EAST)
         
         return header
     }
@@ -72,6 +94,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             toolTipText = tooltip
             isBorderPainted = false
             isContentAreaFilled = false
+            margin = Insets(4, 4, 4, 4)
             action?.let { addActionListener { it() } }
         }
     }
@@ -81,24 +104,92 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         panel.background = JBColor.PanelBackground
         panel.border = JBUI.Borders.emptyTop(8)
         
-        val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+        // 顶部工具栏
+        val toolbar = JPanel(BorderLayout())
         toolbar.isOpaque = false
+        toolbar.border = JBUI.Borders.emptyBottom(4)
         
-        toolbar.add(createToolbarButton(AllIcons.General.InspectionsEye, "表情"))
-        toolbar.add(createToolbarButton(AllIcons.FileTypes.Any_type, "发送图片") { sendImage() })
-        toolbar.add(createToolbarButton(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
+        // 左侧工具按钮
+        val leftTools = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
+        leftTools.isOpaque = false
+        leftTools.add(createToolbarButton(AllIcons.General.InspectionsEye, "表情"))
+        leftTools.add(createToolbarButton(AllIcons.FileTypes.Any_type, "发送图片") { sendImage() })
+        leftTools.add(createToolbarButton(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
+        leftTools.add(createToolbarButton(AllIcons.Actions.Refresh, "刷新联系人") { service.refreshPeers() })
+        leftTools.add(createToolbarButton(AllIcons.General.Add, "添加联系人") { showAddContactDialog() })
+        toolbar.add(leftTools, BorderLayout.WEST)
         
         panel.add(toolbar, BorderLayout.NORTH)
         
-        val inputScrollPane = JBScrollPane(inputArea)
-        inputScrollPane.border = JBUI.Borders.empty()
-        panel.add(inputScrollPane, BorderLayout.CENTER)
+        // 中间输入区域
+        val inputPanel = JPanel(BorderLayout())
+        inputPanel.background = JBColor.PanelBackground
         
-        val sendButton = JButton("发送")
-        sendButton.addActionListener { sendMessage() }
-        panel.add(sendButton, BorderLayout.EAST)
+        val inputScrollPane = JBScrollPane(inputArea)
+        inputScrollPane.border = LineBorder(JBColor.GRAY, 1)
+        inputPanel.add(inputScrollPane, BorderLayout.CENTER)
+        
+        // 美化发送按钮
+        val sendButton = JButton("发送").apply {
+            font = Font("Microsoft YaHei", Font.BOLD, 13)
+            background = JBColor(Color(0, 122, 255), Color(0, 86, 178))
+            foreground = Color.WHITE
+            isBorderPainted = false
+            isFocusPainted = false
+            margin = Insets(8, 20, 8, 20)
+            cursor = Cursor(Cursor.HAND_CURSOR)
+            addActionListener { sendMessage() }
+        }
+        inputPanel.add(sendButton, BorderLayout.EAST)
+        
+        panel.add(inputPanel, BorderLayout.CENTER)
         
         return panel
+    }
+    
+    private fun showAddContactDialog() {
+        val ipField = JTextField(15)
+        val portField = JTextField("8889", 6)
+        val nameField = JTextField(15)
+        
+        val panel = JPanel(GridBagLayout())
+        val gbc = GridBagConstraints()
+        gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.insets = Insets(4, 4, 4, 4)
+        
+        gbc.gridx = 0; gbc.gridy = 0
+        panel.add(JLabel("IP地址:"), gbc)
+        gbc.gridx = 1
+        panel.add(ipField, gbc)
+        
+        gbc.gridx = 0; gbc.gridy = 1
+        panel.add(JLabel("端口:"), gbc)
+        gbc.gridx = 1
+        panel.add(portField, gbc)
+        
+        gbc.gridx = 0; gbc.gridy = 2
+        panel.add(JLabel("昵称:"), gbc)
+        gbc.gridx = 1
+        panel.add(nameField, gbc)
+        
+        val result = Messages.showOkCancelDialog(
+            panel,
+            "添加联系人",
+            "LAN Chat",
+            "确定",
+            "取消",
+            AllIcons.General.Add
+        )
+        
+        if (result == Messages.OK) {
+            val ip = ipField.text.trim()
+            val port = portField.text.trim().toIntOrNull() ?: 8889
+            val name = nameField.text.trim().ifEmpty { "匿名用户" }
+            
+            if (ip.isNotEmpty()) {
+                service.addManualPeer(ip, port, name)
+            }
+        }
     }
     
     private fun setupShortcuts() {
@@ -119,9 +210,17 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         })
     }
     
+    fun setCurrentPeer(peer: Peer?) {
+        currentPeer = peer
+        // 更新标题显示当前聊天对象
+    }
+    
     private fun sendMessage() {
         val text = inputArea.text.trim()
-        if (text.isEmpty()) return
+        if (text.isEmpty()) {
+            inputArea.requestFocus()
+            return
+        }
         
         currentPeer?.let { peer ->
             service.sendTextMessage(peer.id, text)
@@ -133,6 +232,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 receiverId = peer.id,
                 content = text
             ))
+        } ?: run {
+            // 提示选择联系人
+            Messages.showInfoMessage("请先选择一个联系人", "提示")
         }
     }
     
@@ -148,7 +250,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             currentPeer?.let { peer ->
                 service.sendImageMessage(peer.id, file.absolutePath)
                 addImageMessageToPanel(file)
-            }
+            } ?: Messages.showInfoMessage("请先选择一个联系人", "提示")
         }
     }
     
@@ -160,7 +262,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             currentPeer?.let { peer ->
                 service.sendFileMessage(peer.id, file.absolutePath, file.name)
                 addFileMessageToPanel(file)
-            }
+            } ?: Messages.showInfoMessage("请先选择一个联系人", "提示")
         }
     }
     
@@ -209,10 +311,11 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         
         val messageLabel = JLabel(message.content)
         messageLabel.foreground = if (isSentByMe) Color.WHITE else JBColor.BLACK
+        messageLabel.font = Font("Microsoft YaHei", Font.PLAIN, 14)
         bubblePanel.add(messageLabel, BorderLayout.CENTER)
         
         val timeLabel = JLabel(message.getFormattedTime())
-        timeLabel.font = timeLabel.font.deriveFont(10f)
+        timeLabel.font = Font("Microsoft YaHei", Font.PLAIN, 10)
         timeLabel.foreground = if (isSentByMe) Color(200, 200, 200) else JBColor.GRAY
         bubblePanel.add(timeLabel, BorderLayout.SOUTH)
         
@@ -237,7 +340,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         try {
             val icon = ImageIcon(file.path)
             val img = icon.image
-            val scaledImg = img.getScaledInstance(200, 150, 4) // SCALE_SMOOTH = 4
+            val scaledImg = img.getScaledInstance(200, 150, 4)
             innerPanel.add(JLabel(ImageIcon(scaledImg)), BorderLayout.CENTER)
         } catch (e: Exception) {
             innerPanel.add(JLabel("[图片] ${file.name}"), BorderLayout.CENTER)
@@ -268,16 +371,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         
         val sizeLabel = JLabel("${file.length() / 1024} KB")
         sizeLabel.foreground = JBColor.GRAY
-        sizeLabel.font = sizeLabel.font.deriveFont(11f)
+        sizeLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11)
         infoPanel.add(sizeLabel, BorderLayout.SOUTH)
         
         innerPanel.add(infoPanel, BorderLayout.CENTER)
         panel.add(innerPanel, BorderLayout.EAST)
         
         return panel
-    }
-    
-    fun setCurrentPeer(peer: Peer?) {
-        currentPeer = peer
     }
 }
