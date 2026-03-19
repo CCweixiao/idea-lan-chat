@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import java.net.*
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 网络管理器
@@ -233,7 +234,7 @@ class NetworkManager {
         isRunning = false
         udpSocket?.close()
         serverSocket?.close()
-        connections.values.forEach { it.close() }
+        connections.values.toList().forEach { it.close() }
         connections.clear()
         scope.cancel()
     }

@@ -157,7 +157,7 @@ class LanChatService : Disposable {
     /**
      * 设置用户名
      */
-    fun setUsername(newUsername: String) {
+    fun updateUsername(newUsername: String) {
         username = newUsername
         networkManager.updateUsername(newUsername)
     }

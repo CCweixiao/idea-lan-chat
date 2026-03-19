@@ -9,8 +9,6 @@ import com.lanchat.LanChatService
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
 import com.lanchat.network.Peer
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
 import java.awt.*
 import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
@@ -24,154 +22,86 @@ import javax.swing.border.EmptyBorder
 class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     
     private val service = LanChatService.getInstance()
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
-    private val messagePanel = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        background = JBColor.PanelBackground
-    }
-    
-    private val messageScrollPane = JBScrollPane(messagePanel).apply {
-        horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-        verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-        border = JBUI.Borders.empty()
-    }
-    
-    private val inputArea = JTextArea(3, 0).apply {
-        lineWrap = true
-        wrapStyleWord = true
-        border = EmptyBorder(8, 8, 8, 8)
-    }
-    
+    private val messagePanel = JPanel()
+    private val messageScrollPane: JBScrollPane
+    private val inputArea = JTextArea(3, 0)
     private var currentPeer: Peer? = null
     
     init {
+        messagePanel.layout = BoxLayout(messagePanel, BoxLayout.Y_AXIS)
+        messagePanel.background = JBColor.PanelBackground
+        
+        messageScrollPane = JBScrollPane(messagePanel).apply {
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            border = JBUI.Borders.empty()
+        }
+        
+        inputArea.lineWrap = true
+        inputArea.wrapStyleWord = true
+        inputArea.border = EmptyBorder(8, 8, 8, 8)
+        
         setupUI()
     }
     
     private fun setupUI() {
-        // 顶部标题栏
-        val header = createHeader()
-        add(header, BorderLayout.NORTH)
-        
-        // 中间消息区域
+        add(createHeader(), BorderLayout.NORTH)
         add(messageScrollPane, BorderLayout.CENTER)
-        
-        // 底部输入区域
-        val inputPanel = createInputPanel()
-        add(inputPanel, BorderLayout.SOUTH)
-        
-        // 设置快捷键
+        add(createInputPanel(), BorderLayout.SOUTH)
         setupShortcuts()
     }
     
     private fun createHeader(): JPanel {
-        return JPanel(BorderLayout()).apply {
-            background = JBColor.PanelBackground
-            border = JBUI.Borders.empty(12)
-            
-            // 左侧：用户信息
-            val userInfo = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                isOpaque = false
-                
-                add(JLabel("选择联系人开始聊天").apply {
-                    font = font.deriveFont(Font.BOLD, 14f)
-                })
-            }
-            add(userInfo, BorderLayout.WEST)
-            
-            // 右侧：操作按钮
-            val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-                isOpaque = false
-                
-                // 语音通话
-                add(JButton(AllIcons.Actions.Resume).apply {
-                    toolTipText = "语音通话"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                })
-                
-                // 视频通话
-                add(JButton(AllIcons.Actions.Preview).apply {
-                    toolTipText = "视频通话"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                })
-                
-                // 更多选项
-                add(JButton(AllIcons.Actions.More).apply {
-                    toolTipText = "更多选项"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                })
-            }
-            add(actions, BorderLayout.EAST)
+        val header = JPanel(BorderLayout())
+        header.background = JBColor.PanelBackground
+        header.border = JBUI.Borders.empty(12)
+        
+        val userInfo = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0))
+        userInfo.isOpaque = false
+        val label = JLabel("选择联系人开始聊天")
+        label.font = label.font.deriveFont(Font.BOLD, 14f)
+        userInfo.add(label)
+        header.add(userInfo, BorderLayout.WEST)
+        
+        return header
+    }
+    
+    private fun createToolbarButton(icon: Icon, tooltip: String, action: (() -> Unit)? = null): JButton {
+        return JButton(icon).apply {
+            toolTipText = tooltip
+            isBorderPainted = false
+            isContentAreaFilled = false
+            action?.let { addActionListener { it() } }
         }
     }
     
     private fun createInputPanel(): JPanel {
-        return JPanel(BorderLayout()).apply {
-            background = JBColor.PanelBackground
-            border = JBUI.Borders.emptyTop(8)
-            
-            // 工具栏
-            val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-                isOpaque = false
-                
-                // 表情
-                add(JButton(AllIcons.General.InspectionsEye).apply {
-                    toolTipText = "表情"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                })
-                
-                // 图片
-                add(JButton(AllIcons.FileTypes.Image).apply {
-                    toolTipText = "发送图片"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                    addActionListener {
-                        sendImage()
-                    }
-                })
-                
-                // 文件
-                add(JButton(AllIcons.FileTypes.Any_type).apply {
-                    toolTipText = "发送文件"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                    addActionListener {
-                        sendFile()
-                    }
-                })
-                
-                // 代码片段
-                add(JButton(AllIcons.Actions.Paste).apply {
-                    toolTipText = "发送代码片段"
-                    isBorderPainted = false
-                    isContentAreaFilled = false
-                })
-            }
-            add(toolbar, BorderLayout.NORTH)
-            
-            // 输入框
-            val inputScrollPane = JBScrollPane(inputArea).apply {
-                border = JBUI.Borders.empty()
-            }
-            add(inputScrollPane, BorderLayout.CENTER)
-            
-            // 发送按钮
-            val sendButton = JButton("发送").apply {
-                addActionListener {
-                    sendMessage()
-                }
-            }
-            add(sendButton, BorderLayout.EAST)
-        }
+        val panel = JPanel(BorderLayout())
+        panel.background = JBColor.PanelBackground
+        panel.border = JBUI.Borders.emptyTop(8)
+        
+        val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+        toolbar.isOpaque = false
+        
+        toolbar.add(createToolbarButton(AllIcons.General.InspectionsEye, "表情"))
+        toolbar.add(createToolbarButton(AllIcons.FileTypes.Any_type, "发送图片") { sendImage() })
+        toolbar.add(createToolbarButton(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
+        
+        panel.add(toolbar, BorderLayout.NORTH)
+        
+        val inputScrollPane = JBScrollPane(inputArea)
+        inputScrollPane.border = JBUI.Borders.empty()
+        panel.add(inputScrollPane, BorderLayout.CENTER)
+        
+        val sendButton = JButton("发送")
+        sendButton.addActionListener { sendMessage() }
+        panel.add(sendButton, BorderLayout.EAST)
+        
+        return panel
     }
     
     private fun setupShortcuts() {
-        // Enter 发送消息
         val enterKey = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0)
         inputArea.getInputMap(JComponent.WHEN_FOCUSED).put(enterKey, "send")
         inputArea.actionMap.put("send", object : AbstractAction() {
@@ -180,7 +110,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
         })
         
-        // Ctrl+Enter 换行
         val ctrlEnterKey = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.CTRL_DOWN_MASK)
         inputArea.getInputMap(JComponent.WHEN_FOCUSED).put(ctrlEnterKey, "newline")
         inputArea.actionMap.put("newline", object : AbstractAction() {
@@ -190,9 +119,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         })
     }
     
-    /**
-     * 发送文本消息
-     */
     private fun sendMessage() {
         val text = inputArea.text.trim()
         if (text.isEmpty()) return
@@ -201,7 +127,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             service.sendTextMessage(peer.id, text)
             inputArea.text = ""
             
-            // 添加到消息面板
             addMessageToPanel(Message(
                 type = MessageType.TEXT,
                 senderId = service.currentUser?.id ?: "",
@@ -211,16 +136,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
     
-    /**
-     * 发送图片
-     */
     private fun sendImage() {
-        val fileChooser = JFileChooser().apply {
-            fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
-                "图片文件 (*.jpg, *.jpeg, *.png, *.gif)",
-                "jpg", "jpeg", "png", "gif"
-            )
-        }
+        val fileChooser = JFileChooser()
+        fileChooser.fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
+            "图片文件 (*.jpg, *.jpeg, *.png, *.gif)",
+            "jpg", "jpeg", "png", "gif"
+        )
         
         if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
             val file = fileChooser.selectedFile
@@ -231,9 +152,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
     
-    /**
-     * 发送文件
-     */
     private fun sendFile() {
         val fileChooser = JFileChooser()
         
@@ -246,17 +164,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
     
-    /**
-     * 添加文本消息到面板
-     */
     private fun addMessageToPanel(message: Message) {
         SwingUtilities.invokeLater {
-            val messageComponent = createTextMessageComponent(message)
-            messagePanel.add(messageComponent)
+            messagePanel.add(createTextMessageComponent(message))
             messagePanel.revalidate()
             messagePanel.repaint()
             
-            // 滚动到底部
             SwingUtilities.invokeLater {
                 val vertical = messageScrollPane.verticalScrollBar
                 vertical.value = vertical.maximum
@@ -264,132 +177,107 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
     
-    /**
-     * 添加图片消息到面板
-     */
     private fun addImageMessageToPanel(file: File) {
         SwingUtilities.invokeLater {
-            val imageComponent = createImageMessageComponent(file)
-            messagePanel.add(imageComponent)
+            messagePanel.add(createImageMessageComponent(file))
             messagePanel.revalidate()
             messagePanel.repaint()
-            
-            // 滚动到底部
-            SwingUtilities.invokeLater {
-                val vertical = messageScrollPane.verticalScrollBar
-                vertical.value = vertical.maximum
-            }
         }
     }
     
-    /**
-     * 添加文件消息到面板
-     */
     private fun addFileMessageToPanel(file: File) {
         SwingUtilities.invokeLater {
-            val fileComponent = createFileMessageComponent(file)
-            messagePanel.add(fileComponent)
+            messagePanel.add(createFileMessageComponent(file))
             messagePanel.revalidate()
             messagePanel.repaint()
         }
     }
     
-    /**
-     * 创建文本消息组件
-     */
     private fun createTextMessageComponent(message: Message): JPanel {
-        return JPanel(BorderLayout()).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(8, 16, 8, 16)
-            
-            val isSentByMe = message.senderId == service.currentUser?.id
-            
-            val bubblePanel = JPanel(BorderLayout()).apply {
-                background = if (isSentByMe) 
-                    JBColor(Color(0, 122, 255), Color(0, 86, 178))
-                else 
-                    JBColor(Color(240, 240, 240), Color(60, 60, 60))
-                border = JBUI.Borders.empty(12, 16)
-                
-                val messageLabel = JLabel(message.content).apply {
-                    foreground = if (isSentByMe) Color.WHITE else JBColor.BLACK
-                }
-                add(messageLabel, BorderLayout.CENTER)
-                
-                val timeLabel = JLabel(message.getFormattedTime()).apply {
-                    font = font.deriveFont(10f)
-                    foreground = if (isSentByMe) Color(200, 200, 200) else JBColor.GRAY
-                }
-                add(timeLabel, BorderLayout.SOUTH)
-            }
-            
-            if (isSentByMe) {
-                add(bubblePanel, BorderLayout.EAST)
-            } else {
-                add(bubblePanel, BorderLayout.WEST)
-            }
+        val panel = JPanel(BorderLayout())
+        panel.isOpaque = false
+        panel.border = JBUI.Borders.empty(8, 16, 8, 16)
+        
+        val isSentByMe = message.senderId == service.currentUser?.id
+        
+        val bubblePanel = JPanel(BorderLayout())
+        bubblePanel.background = if (isSentByMe) 
+            JBColor(Color(0, 122, 255), Color(0, 86, 178))
+        else 
+            JBColor(Color(240, 240, 240), Color(60, 60, 60))
+        bubblePanel.border = JBUI.Borders.empty(12, 16)
+        
+        val messageLabel = JLabel(message.content)
+        messageLabel.foreground = if (isSentByMe) Color.WHITE else JBColor.BLACK
+        bubblePanel.add(messageLabel, BorderLayout.CENTER)
+        
+        val timeLabel = JLabel(message.getFormattedTime())
+        timeLabel.font = timeLabel.font.deriveFont(10f)
+        timeLabel.foreground = if (isSentByMe) Color(200, 200, 200) else JBColor.GRAY
+        bubblePanel.add(timeLabel, BorderLayout.SOUTH)
+        
+        if (isSentByMe) {
+            panel.add(bubblePanel, BorderLayout.EAST)
+        } else {
+            panel.add(bubblePanel, BorderLayout.WEST)
         }
+        
+        return panel
     }
     
-    /**
-     * 创建图片消息组件
-     */
     private fun createImageMessageComponent(file: File): JPanel {
-        return JPanel(BorderLayout()).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(8, 16, 8, 16)
-            
-            add(JPanel(BorderLayout()).apply {
-                background = JBColor.PanelBackground
-                border = JBUI.Borders.empty()
-                
-                try {
-                    val icon = ImageIcon(file.path)
-                    val scaledIcon = icon.image.getScaledInstance(200, 150, Image.SCALE_SMOOTH)
-                    add(JLabel(ImageIcon(scaledIcon)), BorderLayout.CENTER)
-                } catch (e: Exception) {
-                    add(JLabel("[图片] ${file.name}"), BorderLayout.CENTER)
-                }
-            }, BorderLayout.EAST)
+        val panel = JPanel(BorderLayout())
+        panel.isOpaque = false
+        panel.border = JBUI.Borders.empty(8, 16, 8, 16)
+        
+        val innerPanel = JPanel(BorderLayout())
+        innerPanel.background = JBColor.PanelBackground
+        innerPanel.border = JBUI.Borders.empty()
+        
+        try {
+            val icon = ImageIcon(file.path)
+            val img = icon.image
+            val scaledImg = img.getScaledInstance(200, 150, 4) // SCALE_SMOOTH = 4
+            innerPanel.add(JLabel(ImageIcon(scaledImg)), BorderLayout.CENTER)
+        } catch (e: Exception) {
+            innerPanel.add(JLabel("[图片] ${file.name}"), BorderLayout.CENTER)
         }
+        
+        panel.add(innerPanel, BorderLayout.EAST)
+        return panel
     }
     
-    /**
-     * 创建文件消息组件
-     */
     private fun createFileMessageComponent(file: File): JPanel {
-        return JPanel(BorderLayout()).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(8, 16, 8, 16)
-            
-            add(JPanel(BorderLayout()).apply {
-                background = JBColor(Color(240, 240, 240), Color(60, 60, 60))
-                border = JBUI.Borders.empty(12, 16)
-                
-                add(JLabel(AllIcons.FileTypes.Any_type).apply {
-                    horizontalAlignment = SwingConstants.CENTER
-                }, BorderLayout.WEST)
-                
-                add(JPanel(BorderLayout()).apply {
-                    isOpaque = false
-                    border = JBUI.Borders.emptyLeft(12)
-                    
-                    add(JLabel(file.name), BorderLayout.NORTH)
-                    add(JLabel("${file.length() / 1024} KB").apply {
-                        foreground = JBColor.GRAY
-                        font = font.deriveFont(11f)
-                    }, BorderLayout.SOUTH)
-                }, BorderLayout.CENTER)
-            }, BorderLayout.EAST)
-        }
+        val panel = JPanel(BorderLayout())
+        panel.isOpaque = false
+        panel.border = JBUI.Borders.empty(8, 16, 8, 16)
+        
+        val innerPanel = JPanel(BorderLayout())
+        innerPanel.background = JBColor(Color(240, 240, 240), Color(60, 60, 60))
+        innerPanel.border = JBUI.Borders.empty(12, 16)
+        
+        val iconLabel = JLabel(AllIcons.FileTypes.Any_type)
+        iconLabel.horizontalAlignment = SwingConstants.CENTER
+        innerPanel.add(iconLabel, BorderLayout.WEST)
+        
+        val infoPanel = JPanel(BorderLayout())
+        infoPanel.isOpaque = false
+        infoPanel.border = JBUI.Borders.emptyLeft(12)
+        
+        infoPanel.add(JLabel(file.name), BorderLayout.NORTH)
+        
+        val sizeLabel = JLabel("${file.length() / 1024} KB")
+        sizeLabel.foreground = JBColor.GRAY
+        sizeLabel.font = sizeLabel.font.deriveFont(11f)
+        infoPanel.add(sizeLabel, BorderLayout.SOUTH)
+        
+        innerPanel.add(infoPanel, BorderLayout.CENTER)
+        panel.add(innerPanel, BorderLayout.EAST)
+        
+        return panel
     }
     
-    /**
-     * 设置当前聊天对象
-     */
     fun setCurrentPeer(peer: Peer?) {
         currentPeer = peer
-        // 更新标题栏
-        // 加载聊天历史
     }
 }

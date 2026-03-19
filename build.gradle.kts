@@ -14,18 +14,20 @@ repositories {
 }
 
 // Configure Gradle IntelliJ Plugin
-// Read more: https://plugins.jetbrains.com/docs/intellij/tools-gradle-intellij-plugin.html
 intellij {
     pluginName.set(providers.gradleProperty("pluginName"))
     version.set(providers.gradleProperty("platformVersion"))
     type.set(providers.gradleProperty("platformType"))
     
-    // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file.
+    // 不自动更新
+    updateSinceUntilBuild.set(false)
+    
+    // Plugin Dependencies
     plugins.set(providers.gradleProperty("platformPlugins").map { it.split(',').map(String::trim).filter(String::isNotEmpty) })
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
+    // kotlinx-coroutines 已由 IntelliJ Platform 提供，不需要显式添加
     implementation("com.google.code.gson:gson:2.10.1")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -36,7 +38,6 @@ kotlin {
 }
 
 tasks {
-    // Set the JVM compatibility versions
     withType<JavaCompile> {
         sourceCompatibility = "17"
         targetCompatibility = "17"
