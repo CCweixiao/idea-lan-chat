@@ -10,6 +10,14 @@ group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 
 repositories {
+    // JetBrains IntelliJ 仓库（必须放在前面）
+    maven { url = uri("https://www.jetbrains.com/intellij-repository/releases") }
+    maven { url = uri("https://cache-redirector.jetbrains.com/intellij-dependencies") }
+
+    // 阿里云镜像加速
+    maven { url = uri("https://maven.aliyun.com/repository/central") }
+    maven { url = uri("https://maven.aliyun.com/repository/public") }
+    maven { url = uri("https://maven.aliyun.com/repository/jcenter") }
     mavenCentral()
 }
 
@@ -29,10 +37,12 @@ intellij {
 dependencies {
     // kotlinx-coroutines 已由 IntelliJ Platform 提供，不需要显式添加
     implementation("com.google.code.gson:gson:2.10.1")
-    
-    // SQLite for data persistence
-    implementation("org.xerial:sqlite-jdbc:3.45.1.0")
-    
+
+    // SQLite for data persistence (排除 SLF4J 避免与 IDEA 冲突)
+    implementation("org.xerial:sqlite-jdbc:3.45.1.0") {
+        exclude(group = "org.slf4j", module = "slf4j-api")
+    }
+
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

@@ -4,15 +4,20 @@ package com.lanchat.message
  * 消息类型
  */
 enum class MessageType {
-    TEXT,           // 文本消息
-    IMAGE,          // 图片消息
-    FILE,           // 文件消息
-    SYSTEM,         // 系统消息
-    TYPING,         // 正在输入
-    READ,           // 已读回执
-    GROUP_CHAT,     // 群聊消息
-    MENTION_MEMBER, // @成员消息
-    MENTION_ALL     // @全体成员
+    TEXT,
+    IMAGE,
+    FILE,
+    SYSTEM,
+    TYPING,
+    READ,
+    GROUP_CHAT,
+    MENTION_MEMBER,
+    MENTION_ALL,
+    GROUP_SYNC,
+    FRIEND_REQUEST,
+    FRIEND_RESPONSE,
+    GROUP_INVITE,
+    GROUP_INVITE_RESPONSE
 }
 
 /**

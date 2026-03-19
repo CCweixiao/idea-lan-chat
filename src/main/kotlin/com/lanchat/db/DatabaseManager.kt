@@ -4,36 +4,27 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
-import com.lanchat.network.Bot
-import com.lanchat.network.Group
-import com.lanchat.network.Peer
+import com.lanchat.network.*
 import java.io.File
 import java.sql.*
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * 数据库管理器
- * 使用SQLite持久化存储数据
- */
 object DatabaseManager {
-    
+
     private const val DB_NAME = "lanchat.db"
     private val gson = Gson()
-    
+
     private lateinit var dbPath: String
     private var connection: Connection? = null
-    
-    /**
-     * 初始化数据库
-     */
+
     fun initialize(dataDir: String) {
         dbPath = File(dataDir, DB_NAME).absolutePath
         File(dataDir).mkdirs()
-        
         connect()
         createTables()
+        migrateDatabase()
     }
-    
+
     private fun connect() {
         try {
             Class.forName("org.sqlite.JDBC")
@@ -43,7 +34,7 @@ object DatabaseManager {
             e.printStackTrace()
         }
     }
-    
+
     private fun createTables() {
         executeUpdate("""
             CREATE TABLE IF NOT EXISTS settings (
@@ -51,7 +42,7 @@ object DatabaseManager {
                 value TEXT
             )
         """)
-        
+
         executeUpdate("""
             CREATE TABLE IF NOT EXISTS peers (
                 id TEXT PRIMARY KEY,
@@ -63,7 +54,7 @@ object DatabaseManager {
                 last_seen INTEGER
             )
         """)
-        
+
         executeUpdate("""
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -79,17 +70,18 @@ object DatabaseManager {
                 group_id TEXT
             )
         """)
-        
+
         executeUpdate("""
             CREATE TABLE IF NOT EXISTS groups (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 owner_id TEXT NOT NULL,
                 member_ids TEXT NOT NULL,
-                created_at INTEGER
+                created_at INTEGER,
+                group_number TEXT DEFAULT ''
             )
         """)
-        
+
         executeUpdate("""
             CREATE TABLE IF NOT EXISTS bots (
                 id TEXT PRIMARY KEY,
@@ -99,57 +91,85 @@ object DatabaseManager {
                 created_at INTEGER
             )
         """)
-        
-        // 创建索引
+
+        executeUpdate("""
+            CREATE TABLE IF NOT EXISTS friend_requests (
+                id TEXT PRIMARY KEY,
+                from_user_id TEXT NOT NULL,
+                from_username TEXT NOT NULL,
+                from_ip TEXT NOT NULL,
+                from_port INTEGER NOT NULL,
+                to_ip TEXT NOT NULL,
+                to_port INTEGER NOT NULL,
+                message TEXT,
+                status TEXT NOT NULL DEFAULT 'PENDING_SENT',
+                timestamp INTEGER
+            )
+        """)
+
+        executeUpdate("""
+            CREATE TABLE IF NOT EXISTS group_requests (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                group_number TEXT DEFAULT '',
+                group_name TEXT DEFAULT '',
+                requester_id TEXT NOT NULL,
+                requester_name TEXT NOT NULL,
+                requester_ip TEXT DEFAULT '',
+                requester_port INTEGER DEFAULT 8889,
+                target_id TEXT DEFAULT '',
+                type TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                message TEXT DEFAULT '',
+                timestamp INTEGER
+            )
+        """)
+
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)")
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id)")
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)")
     }
-    
-    private fun executeUpdate(sql: String) {
+
+    private fun migrateDatabase() {
         try {
             connection?.createStatement()?.use { stmt ->
-                stmt.executeUpdate(sql)
+                stmt.executeUpdate("ALTER TABLE groups ADD COLUMN group_number TEXT DEFAULT ''")
             }
+        } catch (_: Exception) { }
+    }
+
+    private fun executeUpdate(sql: String) {
+        try {
+            connection?.createStatement()?.use { stmt -> stmt.executeUpdate(sql) }
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
-    
-    // =============== 设置相关 ===============
-    
+
+    // =============== Settings ===============
+
     fun saveSetting(key: String, value: String) {
         try {
             val sql = "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)"
             connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, key)
-                stmt.setString(2, value)
-                stmt.executeUpdate()
+                stmt.setString(1, key); stmt.setString(2, value); stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
+
     fun getSetting(key: String, default: String = ""): String {
         try {
             val sql = "SELECT value FROM settings WHERE key = ?"
             connection?.prepareStatement(sql)?.use { stmt ->
                 stmt.setString(1, key)
-                stmt.executeQuery()?.use { rs ->
-                    if (rs.next()) {
-                        return rs.getString("value")
-                    }
-                }
+                stmt.executeQuery()?.use { rs -> if (rs.next()) return rs.getString("value") }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
         return default
     }
-    
-    // =============== 联系人相关 ===============
-    
+
+    // =============== Peers ===============
+
     fun savePeer(peer: Peer) {
         try {
             val sql = """
@@ -158,20 +178,14 @@ object DatabaseManager {
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, peer.id)
-                stmt.setString(2, peer.username)
-                stmt.setString(3, peer.ipAddress)
-                stmt.setInt(4, peer.port)
-                stmt.setString(5, peer.avatar)
-                stmt.setInt(6, if (peer.isOnline) 1 else 0)
-                stmt.setLong(7, peer.lastSeen)
-                stmt.executeUpdate()
+                stmt.setString(1, peer.id); stmt.setString(2, peer.username)
+                stmt.setString(3, peer.ipAddress); stmt.setInt(4, peer.port)
+                stmt.setString(5, peer.avatar); stmt.setInt(6, if (peer.isOnline) 1 else 0)
+                stmt.setLong(7, peer.lastSeen); stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
+
     fun loadPeers(): Map<String, Peer> {
         val peers = ConcurrentHashMap<String, Peer>()
         try {
@@ -180,38 +194,29 @@ object DatabaseManager {
                 stmt.executeQuery(sql)?.use { rs ->
                     while (rs.next()) {
                         val peer = Peer(
-                            id = rs.getString("id"),
-                            username = rs.getString("username"),
-                            ipAddress = rs.getString("ip_address"),
-                            port = rs.getInt("port"),
-                            avatar = rs.getString("avatar"),
-                            isOnline = rs.getInt("is_online") == 1,
+                            id = rs.getString("id"), username = rs.getString("username"),
+                            ipAddress = rs.getString("ip_address"), port = rs.getInt("port"),
+                            avatar = rs.getString("avatar"), isOnline = rs.getInt("is_online") == 1,
                             lastSeen = rs.getLong("last_seen")
                         )
                         peers[peer.id] = peer
                     }
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
         return peers
     }
-    
+
     fun deletePeer(peerId: String) {
         try {
-            val sql = "DELETE FROM peers WHERE id = ?"
-            connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, peerId)
-                stmt.executeUpdate()
+            connection?.prepareStatement("DELETE FROM peers WHERE id = ?")?.use { stmt ->
+                stmt.setString(1, peerId); stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
-    // =============== 消息相关 ===============
-    
+
+    // =============== Messages ===============
+
     fun saveMessage(message: Message) {
         try {
             val sql = """
@@ -221,25 +226,18 @@ object DatabaseManager {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, message.id)
-                stmt.setString(2, message.type.name)
-                stmt.setString(3, message.senderId)
-                stmt.setString(4, message.receiverId)
-                stmt.setString(5, message.content)
-                stmt.setString(6, message.fileName)
-                stmt.setLong(7, message.timestamp)
-                stmt.setString(8, message.senderName)
+                stmt.setString(1, message.id); stmt.setString(2, message.type.name)
+                stmt.setString(3, message.senderId); stmt.setString(4, message.receiverId)
+                stmt.setString(5, message.content); stmt.setString(6, message.fileName)
+                stmt.setLong(7, message.timestamp); stmt.setString(8, message.senderName)
                 stmt.setString(9, gson.toJson(message.mentionedUserIds))
                 stmt.setInt(10, if (message.mentionAll) 1 else 0)
-                stmt.setString(11, message.groupId)
-                stmt.executeUpdate()
+                stmt.setString(11, message.groupId); stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
-    fun loadMessages(): Map<String, MutableList<Message>> {
+
+    fun loadMessages(currentUserId: String): Map<String, MutableList<Message>> {
         val messages = ConcurrentHashMap<String, MutableList<Message>>()
         try {
             val sql = "SELECT * FROM messages ORDER BY timestamp ASC"
@@ -247,12 +245,10 @@ object DatabaseManager {
                 stmt.executeQuery(sql)?.use { rs ->
                     while (rs.next()) {
                         val mentionedIds: List<String> = try {
-                            gson.fromJson(rs.getString("mentioned_user_ids"), 
+                            gson.fromJson(rs.getString("mentioned_user_ids"),
                                 object : TypeToken<List<String>>() {}.type) ?: emptyList()
-                        } catch (e: Exception) {
-                            emptyList()
-                        }
-                        
+                        } catch (_: Exception) { emptyList() }
+
                         val message = Message(
                             id = rs.getString("id"),
                             type = MessageType.valueOf(rs.getString("type")),
@@ -266,40 +262,40 @@ object DatabaseManager {
                             mentionAll = rs.getInt("mention_all") == 1,
                             groupId = rs.getString("group_id")
                         )
-                        
-                        // 按 receiver_id 分组
-                        messages.getOrPut(message.receiverId) { mutableListOf() }.add(message)
+
+                        val chatId = if (!message.groupId.isNullOrEmpty()) {
+                            message.groupId
+                        } else if (message.senderId == currentUserId) {
+                            message.receiverId
+                        } else {
+                            message.senderId
+                        }
+                        messages.getOrPut(chatId) { mutableListOf() }.add(message)
                     }
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
         return messages
     }
-    
-    // =============== 群组相关 ===============
-    
+
+    // =============== Groups ===============
+
     fun saveGroup(group: Group) {
         try {
             val sql = """
                 INSERT OR REPLACE INTO groups 
-                (id, name, owner_id, member_ids, created_at) 
-                VALUES (?, ?, ?, ?, ?)
+                (id, name, owner_id, member_ids, created_at, group_number) 
+                VALUES (?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, group.id)
-                stmt.setString(2, group.name)
-                stmt.setString(3, group.ownerId)
-                stmt.setString(4, gson.toJson(group.memberIds))
-                stmt.setLong(5, group.createdAt)
+                stmt.setString(1, group.id); stmt.setString(2, group.name)
+                stmt.setString(3, group.ownerId); stmt.setString(4, gson.toJson(group.memberIds))
+                stmt.setLong(5, group.createdAt); stmt.setString(6, group.groupNumber)
                 stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
+
     fun loadGroups(): Map<String, Group> {
         val groups = ConcurrentHashMap<String, Group>()
         try {
@@ -308,101 +304,187 @@ object DatabaseManager {
                 stmt.executeQuery(sql)?.use { rs ->
                     while (rs.next()) {
                         val memberIds: List<String> = try {
-                            gson.fromJson(rs.getString("member_ids"), 
+                            gson.fromJson(rs.getString("member_ids"),
                                 object : TypeToken<List<String>>() {}.type) ?: emptyList()
-                        } catch (e: Exception) {
-                            emptyList()
-                        }
-                        
+                        } catch (_: Exception) { emptyList() }
+
+                        val groupNumber = try { rs.getString("group_number") ?: "" } catch (_: Exception) { "" }
+
                         val group = Group(
-                            id = rs.getString("id"),
-                            name = rs.getString("name"),
+                            id = rs.getString("id"), name = rs.getString("name"),
                             ownerId = rs.getString("owner_id"),
-                            memberIds = memberIds.toMutableList()
+                            memberIds = memberIds.toMutableList(),
+                            createdAt = rs.getLong("created_at"),
+                            groupNumber = groupNumber
                         )
                         groups[group.id] = group
                     }
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
         return groups
     }
-    
+
     fun deleteGroup(groupId: String) {
         try {
-            val sql = "DELETE FROM groups WHERE id = ?"
-            connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, groupId)
-                stmt.executeUpdate()
+            connection?.prepareStatement("DELETE FROM groups WHERE id = ?")?.use { stmt ->
+                stmt.setString(1, groupId); stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
-    // =============== 机器人相关 ===============
-    
+
+    // =============== Bots ===============
+
     fun saveBot(bot: Bot) {
         try {
-            val sql = """
-                INSERT OR REPLACE INTO bots 
-                (id, name, avatar, description, created_at) 
-                VALUES (?, ?, ?, ?, ?)
-            """
+            val sql = "INSERT OR REPLACE INTO bots (id, name, avatar, description, created_at) VALUES (?, ?, ?, ?, ?)"
             connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, bot.id)
-                stmt.setString(2, bot.name)
-                stmt.setString(3, bot.avatar)
-                stmt.setString(4, bot.description)
-                stmt.setLong(5, bot.createdAt)
-                stmt.executeUpdate()
+                stmt.setString(1, bot.id); stmt.setString(2, bot.name)
+                stmt.setString(3, bot.avatar); stmt.setString(4, bot.description)
+                stmt.setLong(5, bot.createdAt); stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
+
     fun loadBots(): Map<String, Bot> {
         val bots = ConcurrentHashMap<String, Bot>()
         try {
-            val sql = "SELECT * FROM bots"
             connection?.createStatement()?.use { stmt ->
-                stmt.executeQuery(sql)?.use { rs ->
+                stmt.executeQuery("SELECT * FROM bots")?.use { rs ->
                     while (rs.next()) {
                         val bot = Bot(
-                            id = rs.getString("id"),
-                            name = rs.getString("name"),
-                            avatar = rs.getString("avatar"),
-                            description = rs.getString("description"),
+                            id = rs.getString("id"), name = rs.getString("name"),
+                            avatar = rs.getString("avatar"), description = rs.getString("description"),
                             createdAt = rs.getLong("created_at")
                         )
                         bots[bot.id] = bot
                     }
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
         return bots
     }
-    
+
     fun deleteBot(botId: String) {
         try {
-            val sql = "DELETE FROM bots WHERE id = ?"
+            connection?.prepareStatement("DELETE FROM bots WHERE id = ?")?.use { stmt ->
+                stmt.setString(1, botId); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    // =============== Friend Requests ===============
+
+    fun saveFriendRequest(request: FriendRequest) {
+        try {
+            val sql = """
+                INSERT OR REPLACE INTO friend_requests
+                (id, from_user_id, from_username, from_ip, from_port,
+                 to_ip, to_port, message, status, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
             connection?.prepareStatement(sql)?.use { stmt ->
-                stmt.setString(1, botId)
+                stmt.setString(1, request.id); stmt.setString(2, request.fromUserId)
+                stmt.setString(3, request.fromUsername); stmt.setString(4, request.fromIp)
+                stmt.setInt(5, request.fromPort); stmt.setString(6, request.toIp)
+                stmt.setInt(7, request.toPort); stmt.setString(8, request.message)
+                stmt.setString(9, request.status.name); stmt.setLong(10, request.timestamp)
                 stmt.executeUpdate()
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
-    
-    /**
-     * 关闭数据库连接
-     */
+
+    fun loadFriendRequests(): Map<String, FriendRequest> {
+        val requests = ConcurrentHashMap<String, FriendRequest>()
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeQuery("SELECT * FROM friend_requests")?.use { rs ->
+                    while (rs.next()) {
+                        val request = FriendRequest(
+                            id = rs.getString("id"), fromUserId = rs.getString("from_user_id"),
+                            fromUsername = rs.getString("from_username"), fromIp = rs.getString("from_ip"),
+                            fromPort = rs.getInt("from_port"), toIp = rs.getString("to_ip"),
+                            toPort = rs.getInt("to_port"), message = rs.getString("message") ?: "",
+                            status = try { FriendRequestStatus.valueOf(rs.getString("status")) }
+                            catch (_: Exception) { FriendRequestStatus.PENDING_SENT },
+                            timestamp = rs.getLong("timestamp")
+                        )
+                        requests[request.id] = request
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return requests
+    }
+
+    fun deleteFriendRequest(requestId: String) {
+        try {
+            connection?.prepareStatement("DELETE FROM friend_requests WHERE id = ?")?.use { stmt ->
+                stmt.setString(1, requestId); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    // =============== Group Requests ===============
+
+    fun saveGroupRequest(request: GroupRequest) {
+        try {
+            val sql = """
+                INSERT OR REPLACE INTO group_requests
+                (id, group_id, group_number, group_name, requester_id, requester_name,
+                 requester_ip, requester_port, target_id, type, status, message, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            connection?.prepareStatement(sql)?.use { stmt ->
+                stmt.setString(1, request.id); stmt.setString(2, request.groupId)
+                stmt.setString(3, request.groupNumber); stmt.setString(4, request.groupName)
+                stmt.setString(5, request.requesterId); stmt.setString(6, request.requesterName)
+                stmt.setString(7, request.requesterIp); stmt.setInt(8, request.requesterPort)
+                stmt.setString(9, request.targetId); stmt.setString(10, request.type.name)
+                stmt.setString(11, request.status.name); stmt.setString(12, request.message)
+                stmt.setLong(13, request.timestamp); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    fun loadGroupRequests(): Map<String, GroupRequest> {
+        val requests = ConcurrentHashMap<String, GroupRequest>()
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeQuery("SELECT * FROM group_requests")?.use { rs ->
+                    while (rs.next()) {
+                        val request = GroupRequest(
+                            id = rs.getString("id"), groupId = rs.getString("group_id"),
+                            groupNumber = rs.getString("group_number") ?: "",
+                            groupName = rs.getString("group_name") ?: "",
+                            requesterId = rs.getString("requester_id"),
+                            requesterName = rs.getString("requester_name"),
+                            requesterIp = rs.getString("requester_ip") ?: "",
+                            requesterPort = rs.getInt("requester_port"),
+                            targetId = rs.getString("target_id") ?: "",
+                            type = try { GroupRequestType.valueOf(rs.getString("type")) }
+                            catch (_: Exception) { GroupRequestType.INVITE },
+                            status = try { GroupRequestStatus.valueOf(rs.getString("status")) }
+                            catch (_: Exception) { GroupRequestStatus.PENDING },
+                            message = rs.getString("message") ?: "",
+                            timestamp = rs.getLong("timestamp")
+                        )
+                        requests[request.id] = request
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return requests
+    }
+
+    fun deleteGroupRequest(requestId: String) {
+        try {
+            connection?.prepareStatement("DELETE FROM group_requests WHERE id = ?")?.use { stmt ->
+                stmt.setString(1, requestId); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
     fun close() {
         connection?.close()
         connection = null

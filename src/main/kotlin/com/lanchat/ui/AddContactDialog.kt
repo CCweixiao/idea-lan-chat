@@ -6,273 +6,578 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
-import com.lanchat.network.Peer
+import com.lanchat.network.*
 import java.awt.*
-import java.awt.event.ActionEvent
-import java.awt.event.KeyAdapter
-import java.awt.event.KeyEvent
+import java.awt.geom.Ellipse2D
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.swing.*
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 
-/**
- * 添加联系人对话框
- */
 class AddContactDialog(private val project: Project) : DialogWrapper(project) {
-    
+
     private val service = LanChatService.getInstance()
-    
-    // 搜索框
+
     private val searchField = JTextField(20)
-    
-    // IP输入框
     private val ipField = JTextField(15)
     private val portField = JTextField("8889", 6)
     private val nameField = JTextField(15)
-    
-    // 搜索结果列表
+    private val greetingField = JTextField(20)
+    private val groupSearchField = JTextField(15)
+
     private val resultListModel = DefaultListModel<Peer>()
     private val resultList = JList(resultListModel)
-    
-    // 当前选中的联系人
-    var selectedPeer: Peer? = null
-        private set
-    
-    // 是否添加自己
-    var isAddSelf = false
-        private set
-    
+
+    var selectedPeer: Peer? = null; private set
+    var isAddSelf = false; private set
+
     init {
-        title = "添加联系人"
+        title = "联系人与群"
         init()
         setupSearch()
     }
-    
+
     private fun setupSearch() {
-        // 搜索框监听
-        searchField.addKeyListener(object : KeyAdapter() {
-            override fun keyReleased(e: KeyEvent) {
-                searchContacts()
-            }
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = searchContacts()
+            override fun removeUpdate(e: DocumentEvent) = searchContacts()
+            override fun changedUpdate(e: DocumentEvent) = searchContacts()
         })
-        
-        // 设置列表渲染器
-        resultList.cellRenderer = PeerListCellRenderer()
-        
-        // 初始加载已发现的联系人
+        resultList.cellRenderer = PeerCellRenderer()
+        resultList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        resultList.fixedCellHeight = 56
         refreshDiscoveredPeers()
     }
-    
+
     private fun searchContacts() {
         val query = searchField.text.trim().lowercase()
         resultListModel.clear()
-        
-        service.peers.value.values
-            .filter { peer ->
-                query.isEmpty() || 
-                peer.username.lowercase().contains(query) ||
-                peer.ipAddress.contains(query)
-            }
-            .forEach { peer ->
-                resultListModel.addElement(peer)
-            }
+        service.peers.value.values.filter { peer ->
+            query.isEmpty() || peer.username.lowercase().contains(query) || peer.ipAddress.contains(query)
+        }.forEach { resultListModel.addElement(it) }
     }
-    
+
     private fun refreshDiscoveredPeers() {
         resultListModel.clear()
-        service.peers.value.values.forEach { peer ->
-            resultListModel.addElement(peer)
+        service.peers.value.values.forEach { resultListModel.addElement(it) }
+    }
+
+    override fun createCenterPanel(): JComponent {
+        val tabbedPane = JTabbedPane().apply {
+            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            addTab("搜索联系人", createSearchTab())
+            addTab("好友申请", createFriendRequestTab())
+            addTab("发送申请", createSendRequestTab())
+            addTab("搜索群聊", createSearchGroupTab())
+            addTab("申请记录", createRequestHistoryTab())
+        }
+        return JPanel(BorderLayout()).apply {
+            border = JBUI.Borders.empty(4)
+            preferredSize = Dimension(560, 540)
+            add(tabbedPane, BorderLayout.CENTER)
         }
     }
-    
-    override fun createCenterPanel(): JComponent {
-        return JPanel(BorderLayout(0, 12)).apply {
-            border = JBUI.Borders.empty(16)
-            preferredSize = Dimension(550, 450)
-            
-            // 顶部：搜索区域
+
+    // =============== Tab 1: Search Contacts ===============
+
+    private fun createSearchTab(): JPanel {
+        return JPanel(BorderLayout(0, 8)).apply {
+            border = JBUI.Borders.empty(8)
+
             val searchPanel = JPanel(BorderLayout(8, 0)).apply {
-                border = JBUI.Borders.emptyBottom(8)
-                
-                add(JLabel("搜索:"), BorderLayout.WEST)
+                add(JLabel(AllIcons.Actions.Find).apply { border = JBUI.Borders.emptyLeft(4) }, BorderLayout.WEST)
+                searchField.font = Font("Microsoft YaHei", Font.PLAIN, 14)
+                searchField.border = createFieldBorder()
+                searchField.toolTipText = "输入用户名或IP搜索"
                 add(searchField, BorderLayout.CENTER)
-                
-                // 搜索按钮
-                val searchBtn = JButton(AllIcons.Actions.Find).apply {
-                    toolTipText = "搜索"
-                    addActionListener { searchContacts() }
-                }
-                add(searchBtn, BorderLayout.EAST)
             }
             add(searchPanel, BorderLayout.NORTH)
-            
-            // 中间：搜索结果列表
-            val listPanel = JPanel(BorderLayout(0, 8)).apply {
-                add(JLabel("已发现的联系人:").apply {
-                    font = font.deriveFont(Font.BOLD)
-                }, BorderLayout.NORTH)
-                
-                // 列表和添加按钮
-                val listWithButton = JPanel(BorderLayout()).apply {
-                    add(JScrollPane(resultList).apply {
-                        preferredSize = Dimension(200, 180)
-                    }, BorderLayout.CENTER)
-                    
-                    // 底部按钮区
-                    val buttonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 4)).apply {
-                        // 添加选中按钮
-                        val addSelectedBtn = JButton("添加选中", AllIcons.General.Add).apply {
-                            addActionListener {
-                                selectedPeer = resultList.selectedValue
-                                if (selectedPeer != null) {
-                                    close(OK_EXIT_CODE)
-                                }
-                            }
-                        }
-                        add(addSelectedBtn)
-                        
-                        // 刷新按钮
-                        val refreshBtn = JButton("刷新", AllIcons.Actions.Refresh).apply {
-                            addActionListener {
-                                service.refreshPeers()
-                                refreshDiscoveredPeers()
-                            }
-                        }
-                        add(refreshBtn)
-                        
-                        // 添加自己按钮
-                        val addSelfBtn = JButton("添加自己").apply {
-                            toolTipText = "添加自己用于测试"
-                            addActionListener {
-                                isAddSelf = true
-                                close(OK_EXIT_CODE)
-                            }
-                        }
-                        add(addSelfBtn)
-                    }
-                    add(buttonPanel, BorderLayout.SOUTH)
+
+            val resultPanel = JPanel(BorderLayout(0, 6)).apply {
+                val headerPanel = JPanel(BorderLayout()).apply {
+                    add(JLabel("局域网联系人").apply {
+                        font = Font("Microsoft YaHei", Font.BOLD, 13)
+                        foreground = JBColor(Color(80, 80, 80), Color(180, 180, 180))
+                    }, BorderLayout.WEST)
+                    add(JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
+                        isOpaque = false
+                        add(createSmallButton("刷新") { service.refreshPeers(); refreshDiscoveredPeers() })
+                        add(createSmallButton("添加自己(测试)") { isAddSelf = true; close(OK_EXIT_CODE) })
+                    }, BorderLayout.EAST)
                 }
-                add(listWithButton, BorderLayout.CENTER)
+                add(headerPanel, BorderLayout.NORTH)
+                resultList.background = JBColor(Color(250, 250, 250), Color(45, 45, 45))
+                add(JScrollPane(resultList).apply {
+                    border = createListBorder()
+                }, BorderLayout.CENTER)
+                add(createGreenButton("添加选中的联系人") {
+                    selectedPeer = resultList.selectedValue
+                    if (selectedPeer != null) close(OK_EXIT_CODE)
+                    else JOptionPane.showMessageDialog(window, "请先选择联系人", "提示", JOptionPane.INFORMATION_MESSAGE)
+                }, BorderLayout.SOUTH)
             }
-            add(listPanel, BorderLayout.CENTER)
-            
-            // 底部：手动输入区域
-            val manualPanel = JPanel(GridBagLayout()).apply {
-                border = BorderFactory.createTitledBorder(
-                    BorderFactory.createLineBorder(JBColor.GRAY),
-                    "手动添加联系人"
-                )
-                
-                val gbc = GridBagConstraints()
-                gbc.fill = GridBagConstraints.HORIZONTAL
-                gbc.insets = Insets(4, 4, 4, 4)
-                
-                gbc.gridx = 0; gbc.gridy = 0
-                add(JLabel("IP地址:"), gbc)
-                gbc.gridx = 1; gbc.weightx = 1.0
-                add(ipField, gbc)
-                
-                gbc.gridx = 2; gbc.weightx = 0.0
-                add(JLabel("端口:"), gbc)
-                gbc.gridx = 3
-                add(portField, gbc)
-                
-                gbc.gridx = 0; gbc.gridy = 1
-                add(JLabel("昵称:"), gbc)
-                gbc.gridx = 1; gbc.gridwidth = 2
-                add(nameField, gbc)
-                
-                gbc.gridx = 3; gbc.gridwidth = 1
-                val manualAddBtn = JButton("添加", AllIcons.General.Add).apply {
-                    addActionListener {
-                        val ip = ipField.text.trim()
-                        val port = portField.text.trim().toIntOrNull() ?: 8889
-                        val name = nameField.text.trim().ifEmpty { "匿名用户" }
-                        
-                        if (ip.isNotEmpty()) {
-                            selectedPeer = Peer(
-                                id = "manual_${System.currentTimeMillis()}",
-                                username = name,
-                                ipAddress = ip,
-                                port = port,
-                                isOnline = true
-                            )
-                            close(OK_EXIT_CODE)
-                        }
-                    }
-                }
-                add(manualAddBtn, gbc)
-            }
-            add(manualPanel, BorderLayout.SOUTH)
+            add(resultPanel, BorderLayout.CENTER)
         }
     }
-    
-    override fun createActions(): Array<Action> {
-        return arrayOf(cancelAction)
+
+    // =============== Tab 2: Friend Requests ===============
+
+    private fun createFriendRequestTab(): JPanel {
+        val requestListModel = DefaultListModel<FriendRequest>()
+        val requestList = JList(requestListModel).apply {
+            cellRenderer = FriendRequestCellRenderer()
+            fixedCellHeight = 70
+            background = JBColor(Color(250, 250, 250), Color(45, 45, 45))
+        }
+        val groupRequestListModel = DefaultListModel<GroupRequest>()
+        val groupRequestList = JList(groupRequestListModel).apply {
+            cellRenderer = GroupRequestCellRenderer()
+            fixedCellHeight = 70
+            background = JBColor(Color(250, 250, 250), Color(45, 45, 45))
+        }
+
+        fun loadRequests() {
+            requestListModel.clear()
+            service.getPendingReceivedRequests().forEach { requestListModel.addElement(it) }
+            groupRequestListModel.clear()
+            service.getPendingGroupInvites().forEach { groupRequestListModel.addElement(it) }
+        }
+        loadRequests()
+
+        return JPanel(BorderLayout(0, 8)).apply {
+            border = JBUI.Borders.empty(8)
+
+            val topPanel = JPanel(BorderLayout(0, 6)).apply {
+                add(JLabel("待处理的好友申请").apply { font = Font("Microsoft YaHei", Font.BOLD, 13) }, BorderLayout.NORTH)
+                add(JScrollPane(requestList).apply {
+                    border = createListBorder(); preferredSize = Dimension(0, 140)
+                }, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false
+                    add(createGreenButton("通过") {
+                        val s = requestList.selectedValue ?: return@createGreenButton
+                        service.acceptFriendRequest(s.id); loadRequests()
+                        JOptionPane.showMessageDialog(window, "已添加 ${s.fromUsername} 为好友", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    })
+                    add(createRedButton("拒绝") {
+                        val s = requestList.selectedValue ?: return@createRedButton
+                        service.rejectFriendRequest(s.id); loadRequests()
+                    })
+                    add(createSmallButton("模拟收到申请") {
+                        service.simulateIncomingFriendRequest(
+                            "192.168.1.${(10..200).random()}", "测试用户${(1..99).random()}"
+                        )
+                        loadRequests()
+                    })
+                }, BorderLayout.SOUTH)
+            }
+
+            val bottomPanel = JPanel(BorderLayout(0, 6)).apply {
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, JBColor(Color(220, 220, 220), Color(60, 60, 60))),
+                    JBUI.Borders.emptyTop(8)
+                )
+                add(JLabel("群聊邀请 / 入群申请").apply { font = Font("Microsoft YaHei", Font.BOLD, 13) }, BorderLayout.NORTH)
+                add(JScrollPane(groupRequestList).apply {
+                    border = createListBorder(); preferredSize = Dimension(0, 120)
+                }, BorderLayout.CENTER)
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false
+                    add(createGreenButton("同意") {
+                        val s = groupRequestList.selectedValue ?: return@createGreenButton
+                        service.acceptGroupInvite(s.id); loadRequests()
+                        JOptionPane.showMessageDialog(window, "已处理", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    })
+                    add(createRedButton("拒绝") {
+                        val s = groupRequestList.selectedValue ?: return@createRedButton
+                        service.rejectGroupInvite(s.id); loadRequests()
+                    })
+                }, BorderLayout.SOUTH)
+            }
+
+            add(topPanel, BorderLayout.CENTER)
+            add(bottomPanel, BorderLayout.SOUTH)
+        }
     }
-    
-    /**
-     * 联系人列表单元格渲染器 - 美化显示
-     */
-    private class PeerListCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Peer> {
+
+    // =============== Tab 3: Send Request ===============
+
+    private fun createSendRequestTab(): JPanel {
+        return JPanel(BorderLayout(0, 12)).apply {
+            border = JBUI.Borders.empty(8)
+            add(JLabel("通过IP发送好友申请").apply { font = Font("Microsoft YaHei", Font.BOLD, 13) }, BorderLayout.NORTH)
+
+            val formPanel = JPanel(GridBagLayout()).apply {
+                val gbc = GridBagConstraints().apply {
+                    fill = GridBagConstraints.HORIZONTAL; insets = Insets(6, 6, 6, 6)
+                }
+                fun addRow(row: Int, label: String, field: JComponent) {
+                    gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0; gbc.gridwidth = 1
+                    add(JLabel(label).apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) }, gbc)
+                    gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 2
+                    add(field, gbc)
+                }
+                ipField.font = Font("Microsoft YaHei", Font.PLAIN, 13); ipField.border = createFieldBorder()
+                portField.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                nameField.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                greetingField.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                greetingField.text = "你好，我是${service.username}"
+
+                addRow(0, "对方IP:", ipField)
+                addRow(1, "端口:", portField)
+                addRow(2, "备注名:", nameField)
+                addRow(3, "验证消息:", greetingField)
+
+                gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 3; gbc.insets = Insets(16, 6, 6, 6)
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                    add(createGreenButton("发送好友申请") {
+                        val ip = ipField.text.trim()
+                        val port = portField.text.trim().toIntOrNull() ?: 8889
+                        if (ip.isEmpty()) { JOptionPane.showMessageDialog(window, "请输入IP地址", "提示", JOptionPane.WARNING_MESSAGE); return@createGreenButton }
+                        if (service.isPeerExists(ip, port)) { JOptionPane.showMessageDialog(window, "该联系人已存在", "提示", JOptionPane.INFORMATION_MESSAGE); return@createGreenButton }
+                        service.sendFriendRequest(ip, port, greetingField.text.trim())
+                        JOptionPane.showMessageDialog(window, "好友申请已发送到 $ip", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    })
+                    add(createSmallButton("直接添加") {
+                        val ip = ipField.text.trim()
+                        val port = portField.text.trim().toIntOrNull() ?: 8889
+                        val name = nameField.text.trim().ifEmpty { "用户($ip)" }
+                        if (ip.isEmpty()) { JOptionPane.showMessageDialog(window, "请输入IP地址", "提示", JOptionPane.WARNING_MESSAGE); return@createSmallButton }
+                        selectedPeer = Peer(id = "manual_${System.currentTimeMillis()}", username = name, ipAddress = ip, port = port, isOnline = true)
+                        close(OK_EXIT_CODE)
+                    })
+                }, gbc)
+            }
+            add(formPanel, BorderLayout.CENTER)
+        }
+    }
+
+    // =============== Tab 4: Search Group ===============
+
+    private fun createSearchGroupTab(): JPanel {
+        val groupListModel = DefaultListModel<Group>()
+        val groupList = JList(groupListModel).apply {
+            cellRenderer = GroupSearchCellRenderer()
+            fixedCellHeight = 60
+            background = JBColor(Color(250, 250, 250), Color(45, 45, 45))
+        }
+
+        fun searchGroups() {
+            val query = groupSearchField.text.trim()
+            groupListModel.clear()
+            if (query.isEmpty()) {
+                service.groups.value.values.forEach { groupListModel.addElement(it) }
+            } else {
+                service.searchGroupByNumber(query).forEach { groupListModel.addElement(it) }
+                service.groups.value.values
+                    .filter { it.name.lowercase().contains(query.lowercase()) && !groupListModel.contains(it) }
+                    .forEach { groupListModel.addElement(it) }
+            }
+        }
+        searchGroups()
+
+        groupSearchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = searchGroups()
+            override fun removeUpdate(e: DocumentEvent) = searchGroups()
+            override fun changedUpdate(e: DocumentEvent) = searchGroups()
+        })
+
+        return JPanel(BorderLayout(0, 8)).apply {
+            border = JBUI.Borders.empty(8)
+
+            val searchPanel = JPanel(BorderLayout(8, 0)).apply {
+                add(JLabel(AllIcons.Actions.Find).apply { border = JBUI.Borders.emptyLeft(4) }, BorderLayout.WEST)
+                groupSearchField.font = Font("Microsoft YaHei", Font.PLAIN, 14)
+                groupSearchField.border = createFieldBorder()
+                groupSearchField.toolTipText = "输入群号或群名搜索"
+                add(groupSearchField, BorderLayout.CENTER)
+            }
+            add(searchPanel, BorderLayout.NORTH)
+
+            add(JScrollPane(groupList).apply { border = createListBorder() }, BorderLayout.CENTER)
+
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                isOpaque = false
+                add(createGreenButton("申请加入") {
+                    val g = groupList.selectedValue ?: return@createGreenButton
+                    val currentId = service.currentUser?.id ?: return@createGreenButton
+                    if (g.memberIds.contains(currentId)) {
+                        JOptionPane.showMessageDialog(window, "你已经是该群成员", "提示", JOptionPane.INFORMATION_MESSAGE)
+                        return@createGreenButton
+                    }
+                    val greeting = JOptionPane.showInputDialog(window, "输入验证消息:", "申请加入群聊", JOptionPane.PLAIN_MESSAGE) ?: return@createGreenButton
+                    service.requestJoinGroup(g.id, greeting)
+                    JOptionPane.showMessageDialog(window, "入群申请已发送", "成功", JOptionPane.INFORMATION_MESSAGE)
+                })
+                add(JLabel("提示：群号由群主创建时自动生成").apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 11); foreground = JBColor.GRAY
+                })
+            }, BorderLayout.SOUTH)
+        }
+    }
+
+    // =============== Tab 5: Request History ===============
+
+    private fun createRequestHistoryTab(): JPanel {
+        val historyListModel = DefaultListModel<Any>()
+        val historyList = JList<Any>(historyListModel).apply {
+            cellRenderer = RequestHistoryCellRenderer()
+            fixedCellHeight = 56
+            background = JBColor(Color(250, 250, 250), Color(45, 45, 45))
+        }
+
+        fun loadHistory() {
+            historyListModel.clear()
+            val friendReqs = service.getAllFriendRequests().map { it as Any }
+            val groupReqs = service.getAllGroupRequests().map { it as Any }
+            val all = (friendReqs + groupReqs).sortedByDescending {
+                when (it) {
+                    is FriendRequest -> it.timestamp
+                    is GroupRequest -> it.timestamp
+                    else -> 0L
+                }
+            }
+            all.forEach { historyListModel.addElement(it) }
+        }
+        loadHistory()
+
+        return JPanel(BorderLayout(0, 8)).apply {
+            border = JBUI.Borders.empty(8)
+            add(JLabel("所有申请记录 (好友 + 群聊)").apply {
+                font = Font("Microsoft YaHei", Font.BOLD, 13)
+            }, BorderLayout.NORTH)
+            add(JScrollPane(historyList).apply { border = createListBorder() }, BorderLayout.CENTER)
+            add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                isOpaque = false
+                add(createRedButton("删除选中") {
+                    val s = historyList.selectedValue ?: return@createRedButton
+                    when (s) {
+                        is FriendRequest -> service.deleteFriendRequest(s.id)
+                        is GroupRequest -> service.deleteGroupRequest(s.id)
+                    }
+                    loadHistory()
+                })
+                add(createSmallButton("刷新") { loadHistory() })
+            }, BorderLayout.SOUTH)
+        }
+    }
+
+    override fun createActions(): Array<Action> = arrayOf(cancelAction)
+
+    // =============== UI Helpers ===============
+
+    private fun createFieldBorder() = BorderFactory.createCompoundBorder(
+        BorderFactory.createLineBorder(JBColor(Color(210, 210, 210), Color(70, 70, 70)), 1),
+        JBUI.Borders.empty(6, 10)
+    )
+
+    private fun createListBorder() = BorderFactory.createLineBorder(
+        JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1
+    )
+
+    private fun createGreenButton(text: String, action: () -> Unit): JButton {
+        return object : JButton(text) {
+            override fun paintComponent(g: Graphics) {
+                val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = background; g2d.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                super.paintComponent(g2d)
+            }
+        }.apply {
+            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            background = Color(7, 193, 96); foreground = Color.WHITE
+            isBorderPainted = false; isFocusPainted = false; isOpaque = false
+            cursor = Cursor(Cursor.HAND_CURSOR); preferredSize = Dimension(0, 32)
+            border = JBUI.Borders.empty(4, 16, 4, 16)
+            addActionListener { action() }
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseEntered(e: java.awt.event.MouseEvent) { background = Color(6, 173, 86); repaint() }
+                override fun mouseExited(e: java.awt.event.MouseEvent) { background = Color(7, 193, 96); repaint() }
+            })
+        }
+    }
+
+    private fun createRedButton(text: String, action: () -> Unit): JButton {
+        return JButton(text).apply {
+            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
+            isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
+            addActionListener { action() }
+        }
+    }
+
+    private fun createSmallButton(text: String, action: () -> Unit): JButton {
+        return JButton(text).apply {
+            font = Font("Microsoft YaHei", Font.PLAIN, 12)
+            isFocusPainted = false; addActionListener { action() }
+        }
+    }
+
+    // =============== Cell Renderers ===============
+
+    private class PeerCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Peer> {
         private val nameLabel = JLabel()
         private val ipLabel = JLabel()
         private val statusLabel = JLabel()
-        
+        private val peerColors = listOf(Color(76, 175, 80), Color(33, 150, 243), Color(156, 39, 176), Color(255, 152, 0), Color(233, 30, 99), Color(0, 150, 136))
+        private var avatarInitial = "?"; private var avatarColor = peerColors[0]
+        private val avatarPanel = object : JPanel() {
+            override fun paintComponent(g: Graphics) {
+                super.paintComponent(g); val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val size = minOf(width, height) - 4; val x = (width - size) / 2; val y = (height - size) / 2
+                g2d.color = avatarColor
+                g2d.fill(Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
+                g2d.color = Color.WHITE; g2d.font = Font("Microsoft YaHei", Font.BOLD, size * 2 / 5)
+                val fm = g2d.fontMetrics
+                g2d.drawString(avatarInitial, x + (size - fm.stringWidth(avatarInitial)) / 2, y + (size + fm.ascent - fm.descent) / 2)
+            }
+        }.apply { isOpaque = false; preferredSize = Dimension(40, 40) }
+
         init {
-            isOpaque = true
-            border = JBUI.Borders.empty(8, 12)
-            
-            // 左侧：头像区域
-            val avatarPanel = JPanel(BorderLayout()).apply {
-                isOpaque = false
-                preferredSize = Dimension(36, 36)
-            }
+            isOpaque = true; border = JBUI.Borders.empty(8, 12)
             add(avatarPanel, BorderLayout.WEST)
-            
-            // 中间：信息区域
-            val infoPanel = JPanel(BorderLayout(0, 2)).apply {
-                isOpaque = false
-                border = JBUI.Borders.emptyLeft(8)
-                
-                nameLabel.font = Font("Microsoft YaHei", Font.BOLD, 13)
-                add(nameLabel, BorderLayout.NORTH)
-                
-                ipLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11)
-                ipLabel.foreground = JBColor.GRAY
-                add(ipLabel, BorderLayout.CENTER)
-            }
-            add(infoPanel, BorderLayout.CENTER)
-            
-            // 右侧：状态
-            statusLabel.font = Font("Microsoft YaHei", Font.PLAIN, 10)
+            add(JPanel(BorderLayout(0, 2)).apply {
+                isOpaque = false; border = JBUI.Borders.emptyLeft(10)
+                nameLabel.font = Font("Microsoft YaHei", Font.BOLD, 13); add(nameLabel, BorderLayout.CENTER)
+                ipLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11); ipLabel.foreground = JBColor.GRAY; add(ipLabel, BorderLayout.SOUTH)
+            }, BorderLayout.CENTER)
+            statusLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11); statusLabel.border = JBUI.Borders.emptyRight(4)
             add(statusLabel, BorderLayout.EAST)
         }
-        
-        override fun getListCellRendererComponent(
-            list: JList<out Peer>,
-            peer: Peer,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean
-        ): JPanel {
-            nameLabel.text = peer.username
-            ipLabel.text = "${peer.ipAddress}:${peer.port}"
-            
-            // 在线状态
-            if (peer.isOnline) {
-                statusLabel.text = "● 在线"
-                statusLabel.foreground = Color(76, 175, 80)
-            } else {
-                statusLabel.text = "○ 离线"
-                statusLabel.foreground = JBColor.GRAY
+
+        override fun getListCellRendererComponent(list: JList<out Peer>, peer: Peer, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
+            nameLabel.text = peer.username; ipLabel.text = "${peer.ipAddress}:${peer.port}"
+            avatarInitial = peer.username.firstOrNull()?.toString() ?: "?"; avatarColor = peerColors[Math.abs(avatarInitial.hashCode()) % peerColors.size]
+            avatarPanel.repaint()
+            statusLabel.text = if (peer.isOnline) "在线" else "离线"
+            statusLabel.foreground = if (peer.isOnline) Color(76, 175, 80) else JBColor.GRAY
+            background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
+            return this
+        }
+    }
+
+    private class FriendRequestCellRenderer : JPanel(BorderLayout()), ListCellRenderer<FriendRequest> {
+        private val nameLabel = JLabel(); private val msgLabel = JLabel(); private val ipLabel = JLabel()
+        init {
+            isOpaque = true; border = JBUI.Borders.empty(8, 12)
+            add(JPanel(BorderLayout(0, 2)).apply {
+                isOpaque = false
+                nameLabel.font = Font("Microsoft YaHei", Font.BOLD, 13); add(nameLabel, BorderLayout.NORTH)
+                msgLabel.font = Font("Microsoft YaHei", Font.PLAIN, 12); msgLabel.foreground = JBColor(Color(100, 100, 100), Color(160, 160, 160)); add(msgLabel, BorderLayout.CENTER)
+                ipLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11); ipLabel.foreground = JBColor.GRAY; add(ipLabel, BorderLayout.SOUTH)
+            }, BorderLayout.CENTER)
+        }
+        override fun getListCellRendererComponent(list: JList<out FriendRequest>, req: FriendRequest, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
+            nameLabel.text = req.fromUsername; msgLabel.text = req.message; ipLabel.text = "来自 ${req.fromIp}:${req.fromPort}"
+            background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
+            return this
+        }
+    }
+
+    private class GroupRequestCellRenderer : JPanel(BorderLayout()), ListCellRenderer<GroupRequest> {
+        private val titleLabel = JLabel(); private val msgLabel = JLabel(); private val typeLabel = JLabel()
+        init {
+            isOpaque = true; border = JBUI.Borders.empty(8, 12)
+            add(JPanel(BorderLayout(0, 2)).apply {
+                isOpaque = false
+                titleLabel.font = Font("Microsoft YaHei", Font.BOLD, 13); add(titleLabel, BorderLayout.NORTH)
+                msgLabel.font = Font("Microsoft YaHei", Font.PLAIN, 12); msgLabel.foreground = JBColor(Color(100, 100, 100), Color(160, 160, 160)); add(msgLabel, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
+            typeLabel.font = Font("Microsoft YaHei", Font.PLAIN, 10); typeLabel.border = JBUI.Borders.emptyRight(4)
+            add(typeLabel, BorderLayout.EAST)
+        }
+        override fun getListCellRendererComponent(list: JList<out GroupRequest>, req: GroupRequest, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
+            titleLabel.text = "${req.groupName} (${req.groupNumber})"
+            msgLabel.text = "${req.requesterName}: ${req.message}"
+            typeLabel.text = if (req.type == GroupRequestType.INVITE) "邀请" else "申请"
+            typeLabel.foreground = if (req.type == GroupRequestType.INVITE) JBColor(Color(33, 150, 243), Color(100, 180, 255)) else JBColor(Color(255, 152, 0), Color(255, 180, 50))
+            background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
+            return this
+        }
+    }
+
+    private class GroupSearchCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Group> {
+        private val nameLabel = JLabel(); private val numberLabel = JLabel(); private val memberLabel = JLabel()
+        init {
+            isOpaque = true; border = JBUI.Borders.empty(8, 12)
+            val avatarPanel = object : JPanel() {
+                override fun paintComponent(g: Graphics) {
+                    super.paintComponent(g); val g2d = g as Graphics2D
+                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                    val size = minOf(width, height) - 4; val x = (width - size) / 2; val y = (height - size) / 2
+                    g2d.color = JBColor(Color(87, 137, 213), Color(70, 120, 190))
+                    g2d.fillRoundRect(x, y, size, size, 8, 8)
+                    g2d.color = Color.WHITE; g2d.font = Font("Microsoft YaHei", Font.BOLD, 14)
+                    val fm = g2d.fontMetrics; val text = "群"
+                    g2d.drawString(text, x + (size - fm.stringWidth(text)) / 2, y + (size + fm.ascent - fm.descent) / 2)
+                }
+            }.apply { isOpaque = false; preferredSize = Dimension(40, 40) }
+            add(avatarPanel, BorderLayout.WEST)
+            add(JPanel(BorderLayout(0, 2)).apply {
+                isOpaque = false; border = JBUI.Borders.emptyLeft(10)
+                nameLabel.font = Font("Microsoft YaHei", Font.BOLD, 13); add(nameLabel, BorderLayout.CENTER)
+                numberLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11); numberLabel.foreground = JBColor.GRAY; add(numberLabel, BorderLayout.SOUTH)
+            }, BorderLayout.CENTER)
+            memberLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11); memberLabel.foreground = JBColor.GRAY
+            memberLabel.border = JBUI.Borders.emptyRight(4)
+            add(memberLabel, BorderLayout.EAST)
+        }
+        override fun getListCellRendererComponent(list: JList<out Group>, group: Group, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
+            nameLabel.text = group.name; numberLabel.text = "群号: ${group.groupNumber}"; memberLabel.text = "${group.getMemberCount()}人"
+            val isMember = LanChatService.getInstance().currentUser?.id?.let { group.memberIds.contains(it) } ?: false
+            if (isMember) { memberLabel.text = "已加入"; memberLabel.foreground = Color(7, 193, 96) } else { memberLabel.foreground = JBColor.GRAY }
+            background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
+            return this
+        }
+    }
+
+    private class RequestHistoryCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Any> {
+        private val titleLabel = JLabel(); private val detailLabel = JLabel(); private val statusLabel = JLabel()
+        private val timeLabel = JLabel()
+        private val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
+        init {
+            isOpaque = true; border = JBUI.Borders.empty(6, 12)
+            add(JPanel(BorderLayout(0, 1)).apply {
+                isOpaque = false
+                val topRow = JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    titleLabel.font = Font("Microsoft YaHei", Font.PLAIN, 13); add(titleLabel, BorderLayout.CENTER)
+                    timeLabel.font = Font("Microsoft YaHei", Font.PLAIN, 10); timeLabel.foreground = JBColor.GRAY; add(timeLabel, BorderLayout.EAST)
+                }
+                add(topRow, BorderLayout.NORTH)
+                detailLabel.font = Font("Microsoft YaHei", Font.PLAIN, 11); detailLabel.foreground = JBColor.GRAY; add(detailLabel, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
+            statusLabel.font = Font("Microsoft YaHei", Font.BOLD, 11); statusLabel.border = JBUI.Borders.emptyLeft(8)
+            add(statusLabel, BorderLayout.EAST)
+        }
+        override fun getListCellRendererComponent(list: JList<out Any>, value: Any, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
+            when (value) {
+                is FriendRequest -> {
+                    val isSent = value.status == FriendRequestStatus.PENDING_SENT || value.status == FriendRequestStatus.ACCEPTED && value.fromUserId == LanChatService.getInstance().currentUser?.id
+                    titleLabel.text = if (value.status == FriendRequestStatus.PENDING_RECEIVED || value.status == FriendRequestStatus.PENDING_SENT) "[好友] ${value.fromUsername}" else "[好友] ${value.fromUsername}"
+                    detailLabel.text = value.message
+                    timeLabel.text = sdf.format(Date(value.timestamp))
+                    when (value.status) {
+                        FriendRequestStatus.PENDING_SENT -> { statusLabel.text = "等待验证"; statusLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)) }
+                        FriendRequestStatus.PENDING_RECEIVED -> { statusLabel.text = "待处理"; statusLabel.foreground = JBColor(Color(33, 150, 243), Color(100, 180, 255)) }
+                        FriendRequestStatus.ACCEPTED -> { statusLabel.text = "已通过"; statusLabel.foreground = Color(7, 193, 96) }
+                        FriendRequestStatus.REJECTED -> { statusLabel.text = "已拒绝"; statusLabel.foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80)) }
+                    }
+                }
+                is GroupRequest -> {
+                    titleLabel.text = "[群聊] ${value.groupName}"
+                    detailLabel.text = "${if (value.type == GroupRequestType.INVITE) "邀请" else "申请"}: ${value.message}"
+                    timeLabel.text = sdf.format(Date(value.timestamp))
+                    when (value.status) {
+                        GroupRequestStatus.PENDING -> { statusLabel.text = "待处理"; statusLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)) }
+                        GroupRequestStatus.ACCEPTED -> { statusLabel.text = "已同意"; statusLabel.foreground = Color(7, 193, 96) }
+                        GroupRequestStatus.REJECTED -> { statusLabel.text = "已拒绝"; statusLabel.foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80)) }
+                    }
+                }
             }
-            
-            // 选中状态
-            background = if (isSelected) {
-                JBColor(Color(232, 240, 254), Color(60, 60, 80))
-            } else {
-                JBColor.PanelBackground
-            }
-            
+            background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
             return this
         }
     }

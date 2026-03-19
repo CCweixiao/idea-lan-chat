@@ -1,12 +1,10 @@
 package com.lanchat.ui
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
-import com.lanchat.network.Group
 import com.lanchat.network.Peer
 import java.awt.*
 import java.awt.event.ActionEvent
@@ -49,32 +47,46 @@ class MentionMembersDialog(
     
     private fun loadMembers() {
         memberListModel.clear()
-        
+
+        val myId = service.currentUser?.id
         val members = if (groupId != null) {
-            // 群聊：加载群成员
             service.getGroupMembers(groupId)
         } else {
-            // 私聊：加载所有联系人
             service.peers.value.values.toList()
         }
-        
-        members.forEach { peer ->
+
+        members.filter { it.id != myId }.forEach { peer ->
             memberListModel.addElement(peer)
         }
     }
-    
+
     override fun createCenterPanel(): JComponent {
+        memberList.cellRenderer = object : DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(
+                list: JList<*>, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean
+            ): java.awt.Component {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
+                if (value is Peer) {
+                    text = "${value.username}  (${value.ipAddress})"
+                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    border = JBUI.Borders.empty(4, 8)
+                }
+                return this
+            }
+        }
+        memberList.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
+
         return JPanel(BorderLayout(0, 12)).apply {
             border = JBUI.Borders.empty(16)
             preferredSize = Dimension(350, 400)
-            
-            // 顶部说明
+
             val topPanel = JPanel(BorderLayout()).apply {
-                add(JLabel("选择要@的成员："), BorderLayout.WEST)
+                add(JLabel("选择要@的成员：").apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                }, BorderLayout.WEST)
             }
             add(topPanel, BorderLayout.NORTH)
-            
-            // 中间：成员列表
+
             val listPanel = JPanel(BorderLayout()).apply {
                 add(JScrollPane(memberList).apply {
                     preferredSize = Dimension(300, 250)
