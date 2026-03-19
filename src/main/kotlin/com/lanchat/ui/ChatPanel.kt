@@ -148,46 +148,22 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
     
     private fun showAddContactDialog() {
-        val ipField = JTextField(15)
-        val portField = JTextField("8889", 6)
-        val nameField = JTextField(15)
-        
-        val panel = JPanel(GridBagLayout())
-        val gbc = GridBagConstraints()
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        gbc.insets = Insets(4, 4, 4, 4)
-        
-        gbc.gridx = 0; gbc.gridy = 0
-        panel.add(JLabel("IP地址:"), gbc)
-        gbc.gridx = 1
-        panel.add(ipField, gbc)
-        
-        gbc.gridx = 0; gbc.gridy = 1
-        panel.add(JLabel("端口:"), gbc)
-        gbc.gridx = 1
-        panel.add(portField, gbc)
-        
-        gbc.gridx = 0; gbc.gridy = 2
-        panel.add(JLabel("昵称:"), gbc)
-        gbc.gridx = 1
-        panel.add(nameField, gbc)
-        
-        val result = Messages.showOkCancelDialog(
-            panel,
-            "添加联系人",
-            "LAN Chat",
-            "确定",
-            "取消",
-            AllIcons.General.Add
-        )
-        
-        if (result == Messages.OK) {
-            val ip = ipField.text.trim()
-            val port = portField.text.trim().toIntOrNull() ?: 8889
-            val name = nameField.text.trim().ifEmpty { "匿名用户" }
-            
-            if (ip.isNotEmpty()) {
-                service.addManualPeer(ip, port, name)
+        val dialog = AddContactDialog(project)
+        if (dialog.showAndGet()) {
+            if (dialog.isAddSelf) {
+                // 添加自己用于测试
+                val selfPeer = Peer(
+                    id = service.currentUser?.id ?: "self",
+                    username = "${service.username} (自己)",
+                    ipAddress = service.localIp,
+                    port = 8889,
+                    isOnline = true
+                )
+                setCurrentPeer(selfPeer)
+            } else {
+                dialog.selectedPeer?.let { peer ->
+                    service.addManualPeer(peer.ipAddress, peer.port, peer.username)
+                }
             }
         }
     }
