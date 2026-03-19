@@ -208,6 +208,11 @@ class ContactListPanel(
 
     private fun createItemPanel(item: ChatItem): JPanel {
         val isSelected = item == selectedItem
+        val chatId = when (item) {
+            is ChatItem.GroupItem -> item.group.id
+            is ChatItem.PeerItem -> item.peer.id
+        }
+        val unreadCount = service.unreadCounts.value[chatId] ?: 0
 
         class HoverPanel : JPanel(BorderLayout()) {
             var hovering = false
@@ -255,15 +260,61 @@ class ContactListPanel(
 
         panel.add(avatarPanel, BorderLayout.WEST)
 
-        panel.add(JPanel(BorderLayout(0, 2)).apply {
-            isOpaque = false; border = JBUI.Borders.emptyLeft(12)
+        // 中间信息面板
+        val infoPanel = JPanel(BorderLayout(0, 2)).apply {
+            isOpaque = false
+            border = JBUI.Borders.emptyLeft(12)
             add(JLabel(nameText).apply { font = NAME_FONT }, BorderLayout.CENTER)
             add(JLabel(subText).apply { font = SUB_FONT; foreground = JBColor.GRAY }, BorderLayout.SOUTH)
-        }, BorderLayout.CENTER)
+        }
+        panel.add(infoPanel, BorderLayout.CENTER)
 
+        // 右侧面板（在线状态 + 未读徽章）
+        val rightPanel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+        }
+
+        // 未读消息徽章
+        if (unreadCount > 0) {
+            val badgePanel = object : JPanel() {
+                override fun paintComponent(g: Graphics) {
+                    super.paintComponent(g)
+                    val g2d = g as Graphics2D
+                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+
+                    // 计算徽章大小
+                    val text = if (unreadCount > 99) "99+" else unreadCount.toString()
+                    val fm = g2d.fontMetrics
+                    val textWidth = fm.stringWidth(text)
+                    val padding = 6
+                    val badgeWidth = maxOf(textWidth + padding * 2, 18)
+                    val badgeHeight = 18
+                    val x = (width - badgeWidth) / 2
+                    val y = 2
+
+                    // 绘制红色圆形徽章
+                    g2d.color = Color(250, 81, 81)
+                    g2d.fillRoundRect(x, y, badgeWidth, badgeHeight, 9, 9)
+
+                    // 绘制文字
+                    g2d.color = Color.WHITE
+                    g2d.font = Font("Microsoft YaHei", Font.BOLD, 11)
+                    val textX = x + (badgeWidth - textWidth) / 2
+                    val textY = y + (badgeHeight + fm.ascent - fm.descent) / 2 - 1
+                    g2d.drawString(text, textX, textY)
+                }
+            }.apply {
+                isOpaque = false
+                preferredSize = Dimension(40, 22)
+            }
+            rightPanel.add(badgePanel, BorderLayout.NORTH)
+        }
+
+        // 在线状态指示
         if (!isGroup) {
-            panel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 0, 14)).apply {
-                isOpaque = false; preferredSize = Dimension(16, 44)
+            rightPanel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 0, if (unreadCount > 0) 26 else 14)).apply {
+                isOpaque = false
+                preferredSize = Dimension(16, if (unreadCount > 0) 36 else 44)
                 add(object : JPanel() {
                     override fun paintComponent(g: Graphics) {
                         super.paintComponent(g)
@@ -273,8 +324,10 @@ class ContactListPanel(
                         g2d.fillOval(0, 0, 8, 8)
                     }
                 }.apply { isOpaque = false; preferredSize = Dimension(8, 8) })
-            }, BorderLayout.EAST)
+            }, BorderLayout.CENTER)
         }
+
+        panel.add(rightPanel, BorderLayout.EAST)
 
         panel.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
@@ -335,6 +388,7 @@ class ContactListPanel(
     private fun observeData() {
         scope.launch { service.peers.collectLatest { updateData() } }
         scope.launch { service.groups.collectLatest { updateData() } }
+        scope.launch { service.unreadCounts.collectLatest { updateData() } }
     }
 
     private fun updateData() {

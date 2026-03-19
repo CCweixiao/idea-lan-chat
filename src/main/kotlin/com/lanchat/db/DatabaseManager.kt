@@ -141,6 +141,11 @@ object DatabaseManager {
                 stmt.executeUpdate("ALTER TABLE peers ADD COLUMN signature TEXT DEFAULT ''")
             }
         } catch (_: Exception) { }
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("ALTER TABLE messages ADD COLUMN is_read INTEGER DEFAULT 0")
+            }
+        } catch (_: Exception) { }
     }
 
     private fun executeUpdate(sql: String) {
@@ -252,8 +257,8 @@ object DatabaseManager {
             val sql = """
                 INSERT OR REPLACE INTO messages 
                 (id, type, sender_id, receiver_id, content, file_path, timestamp, 
-                 sender_name, mentioned_user_ids, mention_all, group_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 sender_name, mentioned_user_ids, mention_all, group_id, is_read) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
                 stmt.setString(1, message.id); stmt.setString(2, message.type.name)
@@ -262,9 +267,71 @@ object DatabaseManager {
                 stmt.setLong(7, message.timestamp); stmt.setString(8, message.senderName)
                 stmt.setString(9, gson.toJson(message.mentionedUserIds))
                 stmt.setInt(10, if (message.mentionAll) 1 else 0)
-                stmt.setString(11, message.groupId); stmt.executeUpdate()
+                stmt.setString(11, message.groupId)
+                stmt.setInt(12, if (message.isRead) 1 else 0)
+                stmt.executeUpdate()
             }
         } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    /**
+     * 标记指定聊天的所有消息为已读
+     */
+    fun markMessagesAsRead(chatId: String, currentUserId: String) {
+        try {
+            // 标记私聊消息（对方发来的）
+            connection?.prepareStatement(
+                "UPDATE messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0"
+            )?.use { stmt ->
+                stmt.setString(1, chatId)
+                stmt.setString(2, currentUserId)
+                stmt.executeUpdate()
+            }
+            // 标记群聊消息
+            connection?.prepareStatement(
+                "UPDATE messages SET is_read = 1 WHERE group_id = ? AND sender_id != ? AND is_read = 0"
+            )?.use { stmt ->
+                stmt.setString(1, chatId)
+                stmt.setString(2, currentUserId)
+                stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    /**
+     * 获取未读消息计数
+     */
+    fun getUnreadCounts(currentUserId: String): Map<String, Int> {
+        val counts = ConcurrentHashMap<String, Int>()
+        try {
+            // 私聊未读
+            connection?.prepareStatement(
+                "SELECT sender_id, COUNT(*) as cnt FROM messages WHERE receiver_id = ? AND sender_id != ? AND is_read = 0 GROUP BY sender_id"
+            )?.use { stmt ->
+                stmt.setString(1, currentUserId)
+                stmt.setString(2, currentUserId)
+                stmt.executeQuery()?.use { rs ->
+                    while (rs.next()) {
+                        counts[rs.getString("sender_id")] = rs.getInt("cnt")
+                    }
+                }
+            }
+            // 群聊未读
+            connection?.prepareStatement(
+                "SELECT group_id, COUNT(*) as cnt FROM messages WHERE group_id IS NOT NULL AND sender_id != ? AND is_read = 0 GROUP BY group_id"
+            )?.use { stmt ->
+                stmt.setString(1, currentUserId)
+                stmt.executeQuery()?.use { rs ->
+                    while (rs.next()) {
+                        val groupId = rs.getString("group_id")
+                        if (groupId != null) {
+                            counts[groupId] = rs.getInt("cnt")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return counts
     }
 
     fun loadMessages(currentUserId: String): Map<String, MutableList<Message>> {
@@ -279,6 +346,8 @@ object DatabaseManager {
                                 object : TypeToken<List<String>>() {}.type) ?: emptyList()
                         } catch (_: Exception) { emptyList() }
 
+                        val isRead = try { rs.getInt("is_read") == 1 } catch (_: Exception) { false }
+
                         val message = Message(
                             id = rs.getString("id"),
                             type = MessageType.valueOf(rs.getString("type")),
@@ -287,6 +356,7 @@ object DatabaseManager {
                             content = rs.getString("content"),
                             fileName = rs.getString("file_path"),
                             timestamp = rs.getLong("timestamp"),
+                            isRead = isRead,
                             senderName = rs.getString("sender_name"),
                             mentionedUserIds = mentionedIds,
                             mentionAll = rs.getInt("mention_all") == 1,

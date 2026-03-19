@@ -40,6 +40,9 @@ class LanChatService : Disposable {
     private val _groupRequests = MutableStateFlow<Map<String, GroupRequest>>(emptyMap())
     val groupRequests: StateFlow<Map<String, GroupRequest>> = _groupRequests
 
+    private val _unreadCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val unreadCounts: StateFlow<Map<String, Int>> = _unreadCounts
+
     private var _currentUser: Peer? = null
     val currentUser: Peer? get() = _currentUser
 
@@ -98,6 +101,7 @@ class LanChatService : Disposable {
         _bots.value = DatabaseManager.loadBots()
         _friendRequests.value = DatabaseManager.loadFriendRequests()
         _groupRequests.value = DatabaseManager.loadGroupRequests()
+        _unreadCounts.value = DatabaseManager.getUnreadCounts(userId)
 
         migrateGroupNumbers()
 
@@ -167,6 +171,15 @@ class LanChatService : Disposable {
 
     // =============== Message Routing ===============
 
+    private var currentChatId: String? = null
+
+    fun setCurrentChatId(chatId: String?) {
+        currentChatId = chatId
+        if (chatId != null) {
+            markAsRead(chatId)
+        }
+    }
+
     private fun handleReceivedMessage(message: Message) {
         if (message.senderId == _currentUser?.id) return
         when (message.type) {
@@ -178,7 +191,44 @@ class LanChatService : Disposable {
             else -> {
                 addMessageToHistory(message)
                 notifyMessageListeners(message)
+
+                // 增加未读计数（如果当前没有打开对应的聊天窗口）
+                val chatId = when {
+                    !message.groupId.isNullOrEmpty() -> message.groupId
+                    else -> message.senderId
+                }
+                if (chatId != currentChatId) {
+                    incrementUnreadCount(chatId)
+                }
             }
+        }
+    }
+
+    private fun incrementUnreadCount(chatId: String) {
+        val current = _unreadCounts.value.toMutableMap()
+        current[chatId] = (current[chatId] ?: 0) + 1
+        _unreadCounts.value = current
+    }
+
+    fun markAsRead(chatId: String) {
+        val userId = _currentUser?.id ?: return
+        val current = _unreadCounts.value.toMutableMap()
+        if (current.containsKey(chatId) && current[chatId]!! > 0) {
+            current[chatId] = 0
+            _unreadCounts.value = current
+            DatabaseManager.markMessagesAsRead(chatId, userId)
+
+            // 更新内存中的消息状态
+            val msgs = _messages.value.toMutableMap()
+            msgs[chatId]?.forEach { msg ->
+                if (!msg.isSentByMe(userId)) {
+                    val index = msgs[chatId]?.indexOf(msg)
+                    if (index != null && index >= 0) {
+                        msgs[chatId]?.set(index, msg.copy(isRead = true))
+                    }
+                }
+            }
+            _messages.value = msgs
         }
     }
 

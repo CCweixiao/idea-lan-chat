@@ -267,6 +267,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         currentPeer = peer; currentGroup = null; currentBot = peer?.let { service.getBot(it.id) }
         SwingUtilities.invokeLater {
             if (peer != null) {
+                service.setCurrentChatId(peer.id)
                 if (currentBot != null) {
                     titleLabel.text = "${currentBot!!.name} [BOT]"
                     statusLabel.text = "机器人 · 自动回复"
@@ -278,7 +279,10 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 }
                 updateHeaderButtons(); updateToolbar()
                 cardLayout.show(cardPanel, "chat"); loadChatHistory(peer.id)
-            } else { cardLayout.show(cardPanel, "empty") }
+            } else {
+                service.setCurrentChatId(null)
+                cardLayout.show(cardPanel, "empty")
+            }
         }
     }
 
@@ -286,16 +290,21 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         currentGroup = group; currentPeer = null; currentBot = null
         SwingUtilities.invokeLater {
             if (group != null) {
+                service.setCurrentChatId(group.id)
                 titleLabel.text = group.name
                 statusLabel.text = "${group.getMemberCount()} 位成员"; statusLabel.foreground = JBColor.GRAY
                 updateHeaderButtons(); updateToolbar()
                 cardLayout.show(cardPanel, "chat"); loadChatHistory(group.id)
-            } else { cardLayout.show(cardPanel, "empty") }
+            } else {
+                service.setCurrentChatId(null)
+                cardLayout.show(cardPanel, "empty")
+            }
         }
     }
 
     fun clearChat() {
         currentPeer = null; currentGroup = null; currentBot = null
+        service.setCurrentChatId(null)
         SwingUtilities.invokeLater { cardLayout.show(cardPanel, "empty"); clearChatDisplay() }
     }
 

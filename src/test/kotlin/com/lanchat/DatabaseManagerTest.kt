@@ -118,11 +118,13 @@ class DatabaseManagerTest {
         
         DatabaseManager.saveMessage(message)
         
-        val loadedMessages = DatabaseManager.loadMessages()
-        assertTrue(loadedMessages.containsKey("receiver_1"))
-        assertEquals(1, loadedMessages["receiver_1"]!!.size)
+        // currentUserId 应该是当前用户ID，消息会被归类到发送者的chatId
+        // 因为 senderId != currentUserId，所以 chatId = senderId
+        val loadedMessages = DatabaseManager.loadMessages("receiver_1")
+        assertTrue(loadedMessages.containsKey("sender_1"))
+        assertEquals(1, loadedMessages["sender_1"]!!.size)
         
-        val loadedMessage = loadedMessages["receiver_1"]!![0]
+        val loadedMessage = loadedMessages["sender_1"]!![0]
         assertEquals("Hello, World!", loadedMessage.content)
         assertEquals("发送者", loadedMessage.senderName)
     }
@@ -143,7 +145,7 @@ class DatabaseManagerTest {
         
         DatabaseManager.saveMessage(message)
         
-        val loadedMessages = DatabaseManager.loadMessages()
+        val loadedMessages = DatabaseManager.loadMessages("sender_1")
         val loadedMessage = loadedMessages["group_1"]!![0]
         
         assertEquals(2, loadedMessage.mentionedUserIds.size)
