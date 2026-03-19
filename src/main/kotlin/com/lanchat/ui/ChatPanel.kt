@@ -119,7 +119,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 add(createIconButton(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
                 add(createIconButton(AllIcons.Actions.Refresh, "刷新联系人") { service.refreshPeers() })
                 add(createIconButton(AllIcons.General.Add, "添加联系人") { showAddContactDialog() })
-                add(createIconButton(AllIcons.Nodes.Folder, "创建机器人") { showCreateBotDialog() })
             }
             add(toolbar, BorderLayout.NORTH)
             
@@ -174,21 +173,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             } else {
                 dialog.selectedPeer?.let { peer ->
                     service.addManualPeer(peer.ipAddress, peer.port, peer.username)
-                }
-            }
-        }
-    }
-    
-    private fun showCreateBotDialog() {
-        val dialog = CreateBotDialog(project)
-        if (dialog.showAndGet()) {
-            dialog.createdBotId?.let { botId ->
-                val bot = service.getBot(botId)
-                if (bot != null) {
-                    currentBot = bot
-                    currentPeer = null
-                    titleLabel.text = "${bot.name} 🤖"
-                    statusLabel.text = "聊天机器人 - 自动回复"
                 }
             }
         }
@@ -434,38 +418,42 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             isOpaque = false
             border = JBUI.Borders.empty(0, 8, 0, 8)
             
-            // 消息气泡
-            val bubblePanel = JPanel(BorderLayout(0, 2)).apply {
-                val bgColor = when {
-                    isBotMessage -> JBColor(Color(240, 240, 255), Color(50, 50, 70)) // 机器人消息淡紫色
-                    isSentByMe -> Color(95, 188, 95)  // 自己的消息微信绿色
-                    else -> JBColor(Color(255, 255, 255), Color(45, 45, 45)) // 他人消息白色
+            // 消息气泡 - 去掉背景色，使用边框
+            val bubblePanel = object : JPanel(BorderLayout(0, 2)) {
+                override fun getPreferredSize(): Dimension {
+                    val size = super.getPreferredSize()
+                    // 限制最大宽度为400
+                    return Dimension(minOf(size.width, 400), size.height)
                 }
-                background = bgColor
-                border = JBUI.Borders.empty(10, 14, 10, 14)
+            }.apply {
+                isOpaque = false
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(JBColor(Color(220, 220, 220), Color(80, 80, 80)), 1),
+                    JBUI.Borders.empty(8, 12, 8, 12)
+                )
                 
                 // 发送者名称
                 if (!isSentByMe) {
                     val nameLabel = JLabel(if (isBotMessage) "$senderName 🤖" else senderName).apply {
                         font = Font("Microsoft YaHei", Font.PLAIN, 11)
-                        foreground = if (isBotMessage) JBColor(Color(128, 0, 128), Color(180, 100, 255)) else JBColor.GRAY
-                        border = JBUI.Borders.emptyBottom(4)
+                        foreground = if (isBotMessage) JBColor(Color(128, 0, 128), Color(180, 100, 255)) else JBColor(Color(100, 100, 100), Color(150, 150, 150))
+                        border = JBUI.Borders.emptyBottom(2)
                     }
                     add(nameLabel, BorderLayout.NORTH)
                 }
                 
-                // 消息文本
-                val messageLabel = JLabel("<html>${message.content.replace("\n", "<br>")}</html>").apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 14)
-                    foreground = if (isSentByMe) Color.WHITE else JBColor.BLACK
+                // 消息文本 - 自适应宽度
+                val messageLabel = JLabel("<html><body style='width: max-content;'>${message.content.replace("\n", "<br>")}</body></html>").apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    foreground = JBColor.BLACK
                 }
                 add(messageLabel, BorderLayout.CENTER)
                 
                 // 时间
                 val timeLabel = JLabel(message.getFormattedTime()).apply {
                     font = Font("Microsoft YaHei", Font.PLAIN, 10)
-                    foreground = if (isSentByMe) Color(220, 255, 220) else JBColor.GRAY
-                    border = JBUI.Borders.emptyTop(4)
+                    foreground = JBColor.GRAY
+                    border = JBUI.Borders.emptyTop(2)
                 }
                 add(timeLabel, BorderLayout.SOUTH)
             }

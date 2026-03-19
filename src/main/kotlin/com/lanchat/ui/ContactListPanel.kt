@@ -161,16 +161,28 @@ class ContactListPanel(private val project: Project, private val onPeerSelected:
     
     private fun showCreateGroupDialog() {
         val availablePeers = listModel.elements().toList()
-        if (availablePeers.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "暂无联系人，请先添加联系人", "提示", JOptionPane.INFORMATION_MESSAGE)
-            return
-        }
         
         val dialog = CreateGroupDialog(project, availablePeers)
         if (dialog.showAndGet()) {
             val selectedPeers = dialog.selectedPeers
             val groupName = dialog.groupName
-            service.createGroup(groupName, selectedPeers.map { it.id })
+            
+            // 创建群聊（不选择联系人时只拉自己）
+            val memberIds = selectedPeers.map { it.id }
+            service.createGroup(groupName, memberIds)
+            
+            // 如果选择了创建机器人
+            if (dialog.shouldCreateBot && dialog.botName != null) {
+                // 创建群机器人
+                service.createBot(dialog.botName!!)
+            }
+            
+            JOptionPane.showMessageDialog(
+                this, 
+                "群聊「$groupName」创建成功${if (dialog.shouldCreateBot) "，机器人「${dialog.botName}」已加入" else ""}", 
+                "成功", 
+                JOptionPane.INFORMATION_MESSAGE
+            )
         }
     }
     

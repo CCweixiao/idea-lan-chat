@@ -124,8 +124,18 @@ class LanChatService : Disposable {
     
     /**
      * 手动添加联系人
+     * @return true表示添加成功，false表示已存在
      */
-    fun addManualPeer(ipAddress: String, port: Int, name: String) {
+    fun addManualPeer(ipAddress: String, port: Int, name: String): Boolean {
+        // 检查是否已存在相同IP的联系人
+        val exists = _peers.value.values.any { 
+            it.ipAddress == ipAddress && it.port == port 
+        }
+        
+        if (exists) {
+            return false
+        }
+        
         val peer = Peer(
             id = "manual_${System.currentTimeMillis()}",
             username = name,
@@ -134,6 +144,16 @@ class LanChatService : Disposable {
             isOnline = true
         )
         addPeer(peer)
+        return true
+    }
+    
+    /**
+     * 检查联系人是否已存在
+     */
+    fun isPeerExists(ipAddress: String, port: Int): Boolean {
+        return _peers.value.values.any { 
+            it.ipAddress == ipAddress && it.port == port 
+        }
     }
     
     /**
