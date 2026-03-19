@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
+import com.lanchat.network.Group
 import com.lanchat.network.NetworkManager
 import com.lanchat.network.Peer
 import kotlinx.coroutines.*
@@ -222,12 +223,132 @@ class LanChatService : Disposable {
         return _messages.value[chatId] ?: emptyList()
     }
     
+    // =============== 群组管理 ===============
+    
+    private val _groups = MutableStateFlow<Map<String, Group>>(emptyMap())
+    val groups: StateFlow<Map<String, Group>> = _groups
+    
     /**
      * 创建群聊
      */
     fun createGroup(groupName: String, memberIds: List<String>): String {
-        val groupId = "group_${System.currentTimeMillis()}"
-        return groupId
+        val ownerId = _currentUser?.id ?: return ""
+        val group = Group(
+            name = groupName,
+            ownerId = ownerId,
+            memberIds = (memberIds + ownerId).toMutableList()
+        )
+        
+        val currentGroups = _groups.value.toMutableMap()
+        currentGroups[group.id] = group
+        _groups.value = currentGroups
+        
+        return group.id
+    }
+    
+    /**
+     * 添加群成员（只有群主可以操作）
+     */
+    fun addGroupMember(groupId: String, newMemberId: String): Boolean {
+        val userId = _currentUser?.id ?: return false
+        val currentGroups = _groups.value.toMutableMap()
+        val group = currentGroups[groupId] ?: return false
+        
+        if (!group.addMember(userId, newMemberId)) {
+            return false
+        }
+        
+        currentGroups[groupId] = group
+        _groups.value = currentGroups
+        return true
+    }
+    
+    /**
+     * 移除群成员（只有群主可以操作）
+     */
+    fun removeGroupMember(groupId: String, memberId: String): Boolean {
+        val userId = _currentUser?.id ?: return false
+        val currentGroups = _groups.value.toMutableMap()
+        val group = currentGroups[groupId] ?: return false
+        
+        if (!group.removeMember(userId, memberId)) {
+            return false
+        }
+        
+        currentGroups[groupId] = group
+        _groups.value = currentGroups
+        return true
+    }
+    
+    /**
+     * 判断用户是否是群主
+     */
+    fun isGroupOwner(groupId: String): Boolean {
+        val userId = _currentUser?.id ?: return false
+        return _groups.value[groupId]?.isOwner(userId) ?: false
+    }
+    
+    /**
+     * 获取群组信息
+     */
+    fun getGroup(groupId: String): Group? {
+        return _groups.value[groupId]
+    }
+    
+    /**
+     * 获取群组成员列表
+     */
+    fun getGroupMembers(groupId: String): List<Peer> {
+        val group = _groups.value[groupId] ?: return emptyList()
+        return group.memberIds.mapNotNull { memberId ->
+            _peers.value[memberId]
+        }
+    }
+    
+    // =============== @功能 ===============
+    
+    /**
+     * 发送@消息
+     */
+    fun sendMentionMessage(
+        receiverId: String,
+        content: String,
+        mentionedUserIds: List<String> = emptyList(),
+        mentionAll: Boolean = false,
+        groupId: String? = null
+    ) {
+        val senderId = _currentUser?.id ?: return
+        
+        val message = Message(
+            type = if (mentionAll) MessageType.MENTION_ALL else MessageType.MENTION_MEMBER,
+            senderId = senderId,
+            receiverId = receiverId,
+            content = content,
+            mentionedUserIds = mentionedUserIds,
+            mentionAll = mentionAll,
+            groupId = groupId,
+            senderName = _username
+        )
+        sendMessage(message)
+    }
+    
+    /**
+     * 发送群聊消息
+     */
+    fun sendGroupMessage(groupId: String, content: String, mentionedUserIds: List<String> = emptyList(), mentionAll: Boolean = false) {
+        val senderId = _currentUser?.id ?: return
+        
+        val message = Message(
+            type = if (mentionAll || mentionedUserIds.isNotEmpty()) MessageType.GROUP_CHAT else MessageType.TEXT,
+            senderId = senderId,
+            receiverId = groupId,
+            content = content,
+            mentionedUserIds = mentionedUserIds,
+            mentionAll = mentionAll,
+            groupId = groupId,
+            senderName = _username
+        )
+        sendMessage(message)
     }
     
     /**
