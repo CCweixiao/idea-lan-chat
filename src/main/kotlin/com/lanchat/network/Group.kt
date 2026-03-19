@@ -38,10 +38,11 @@ data class Group(
     }
     
     /**
-     * 移除成员（只有群主可以操作）
+     * 移除成员（只有群主可以操作，不能移除群主自己）
      */
     fun removeMember(operatorId: String, memberId: String): Boolean {
         if (!isOwner(operatorId)) return false
+        if (memberId == ownerId) return false  // 不能移除群主
         return memberIds.remove(memberId)
     }
     

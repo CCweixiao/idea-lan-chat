@@ -29,6 +29,10 @@ intellij {
 dependencies {
     // kotlinx-coroutines 已由 IntelliJ Platform 提供，不需要显式添加
     implementation("com.google.code.gson:gson:2.10.1")
+    
+    // SQLite for data persistence
+    implementation("org.xerial:sqlite-jdbc:3.45.1.0")
+    
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

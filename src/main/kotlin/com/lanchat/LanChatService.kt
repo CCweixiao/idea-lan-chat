@@ -3,6 +3,7 @@ package com.lanchat
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
+import com.lanchat.db.DatabaseManager
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
 import com.lanchat.network.Bot
@@ -67,6 +68,26 @@ class LanChatService : Disposable {
         // 获取本机IP
         _localIp = getLocalIpAddress()
         
+        // 初始化数据库
+        val dataDir = System.getProperty("user.home") + "/.lanchat"
+        DatabaseManager.initialize(dataDir)
+        
+        // 加载用户设置
+        _username = DatabaseManager.getSetting("username", _username)
+        _userAvatar = DatabaseManager.getSetting("userAvatar")
+        
+        // 加载已保存的联系人
+        _peers.value = DatabaseManager.loadPeers()
+        
+        // 加载已保存的消息
+        _messages.value = DatabaseManager.loadMessages()
+        
+        // 加载已保存的群组
+        _groups.value = DatabaseManager.loadGroups()
+        
+        // 加载已保存的机器人
+        _bots.value = DatabaseManager.loadBots()
+        
         // 初始化网络管理器
         networkManager = NetworkManager()
         
@@ -120,6 +141,8 @@ class LanChatService : Disposable {
         val currentPeers = _peers.value.toMutableMap()
         currentPeers[peer.id] = peer
         _peers.value = currentPeers
+        // 保存到数据库
+        DatabaseManager.savePeer(peer)
     }
     
     /**
@@ -163,6 +186,8 @@ class LanChatService : Disposable {
         val currentPeers = _peers.value.toMutableMap()
         currentPeers.remove(peerId)
         _peers.value = currentPeers
+        // 从数据库删除
+        DatabaseManager.deletePeer(peerId)
     }
     
     /**
@@ -235,6 +260,9 @@ class LanChatService : Disposable {
         val chatMessages = currentMessages.getOrPut(chatId) { mutableListOf() }
         chatMessages.add(message)
         _messages.value = currentMessages
+        
+        // 保存到数据库
+        DatabaseManager.saveMessage(message)
     }
     
     /**
@@ -264,6 +292,9 @@ class LanChatService : Disposable {
         currentGroups[group.id] = group
         _groups.value = currentGroups
         
+        // 保存到数据库
+        DatabaseManager.saveGroup(group)
+        
         return group.id
     }
     
@@ -281,6 +312,8 @@ class LanChatService : Disposable {
         
         currentGroups[groupId] = group
         _groups.value = currentGroups
+        // 保存到数据库
+        DatabaseManager.saveGroup(group)
         return true
     }
     
@@ -298,6 +331,8 @@ class LanChatService : Disposable {
         
         currentGroups[groupId] = group
         _groups.value = currentGroups
+        // 保存到数据库
+        DatabaseManager.saveGroup(group)
         return true
     }
     
@@ -379,6 +414,8 @@ class LanChatService : Disposable {
         _username = newUsername
         networkManager?.updateUsername(newUsername)
         _currentUser = _currentUser?.copy(username = newUsername)
+        // 保存到数据库
+        DatabaseManager.saveSetting("username", newUsername)
     }
     
     /**
@@ -406,6 +443,9 @@ class LanChatService : Disposable {
         currentBots[bot.id] = bot
         _bots.value = currentBots
         
+        // 保存到数据库
+        DatabaseManager.saveBot(bot)
+        
         // 添加到联系人列表
         addManualPeer("127.0.0.1", 0, "$name 🤖")
         
@@ -419,6 +459,8 @@ class LanChatService : Disposable {
         val currentBots = _bots.value.toMutableMap()
         currentBots.remove(botId)
         _bots.value = currentBots
+        // 从数据库删除
+        DatabaseManager.deleteBot(botId)
     }
     
     /**
@@ -473,11 +515,14 @@ class LanChatService : Disposable {
     fun updateUserAvatar(avatarPath: String) {
         _userAvatar = avatarPath
         _currentUser = _currentUser?.copy(avatar = avatarPath)
+        // 保存到数据库
+        DatabaseManager.saveSetting("userAvatar", avatarPath)
     }
     
     override fun dispose() {
         scope.cancel()
         networkManager?.stop()
         networkManager = null
+        DatabaseManager.close()
     }
 }
