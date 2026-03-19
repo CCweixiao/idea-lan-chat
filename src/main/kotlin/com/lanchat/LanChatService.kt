@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
+import com.lanchat.network.Bot
 import com.lanchat.network.Group
 import com.lanchat.network.NetworkManager
 import com.lanchat.network.Peer
@@ -365,6 +366,93 @@ class LanChatService : Disposable {
      */
     fun refreshPeers() {
         networkManager?.sendDiscovery()
+    }
+    
+    // =============== 机器人管理 ===============
+    
+    private val _bots = MutableStateFlow<Map<String, Bot>>(emptyMap())
+    val bots: StateFlow<Map<String, Bot>> = _bots
+    
+    /**
+     * 创建机器人
+     */
+    fun createBot(name: String, description: String = ""): Bot {
+        val bot = Bot(
+            name = name,
+            description = description.ifEmpty { "我是$name，可以陪你聊天测试" }
+        )
+        
+        val currentBots = _bots.value.toMutableMap()
+        currentBots[bot.id] = bot
+        _bots.value = currentBots
+        
+        // 添加到联系人列表
+        addManualPeer("127.0.0.1", 0, "$name 🤖")
+        
+        return bot
+    }
+    
+    /**
+     * 删除机器人
+     */
+    fun deleteBot(botId: String) {
+        val currentBots = _bots.value.toMutableMap()
+        currentBots.remove(botId)
+        _bots.value = currentBots
+    }
+    
+    /**
+     * 获取机器人
+     */
+    fun getBot(botId: String): Bot? {
+        return _bots.value[botId]
+    }
+    
+    /**
+     * 发送消息给机器人
+     */
+    fun sendBotMessage(botId: String, content: String) {
+        val bot = _bots.value[botId] ?: return
+        val senderId = _currentUser?.id ?: return
+        
+        // 发送用户消息
+        val userMessage = Message(
+            type = MessageType.TEXT,
+            senderId = senderId,
+            receiverId = botId,
+            content = content,
+            senderName = _username
+        )
+        addMessageToHistory(userMessage)
+        
+        // 机器人自动回复
+        scope.launch {
+            delay(500 + (Math.random() * 1000).toLong()) // 模拟思考时间
+            
+            val replyContent = bot.autoReply(content)
+            val botMessage = Message(
+                type = MessageType.TEXT,
+                senderId = botId,
+                receiverId = senderId,
+                content = replyContent,
+                senderName = bot.name
+            )
+            addMessageToHistory(botMessage)
+        }
+    }
+    
+    // =============== 头像管理 ===============
+    
+    private var _userAvatar: String? = null
+    val userAvatar: String?
+        get() = _userAvatar
+    
+    /**
+     * 设置用户头像
+     */
+    fun updateUserAvatar(avatarPath: String) {
+        _userAvatar = avatarPath
+        _currentUser = _currentUser?.copy(avatar = avatarPath)
     }
     
     override fun dispose() {

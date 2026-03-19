@@ -8,6 +8,9 @@ import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
 import java.awt.*
+import java.awt.event.ActionEvent
+import java.io.File
+import javax.imageio.ImageIO
 import javax.swing.*
 
 /**
@@ -23,6 +26,10 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
     // 显示当前IP
     private val ipLabel = JLabel()
     
+    // 头像
+    private var avatarPath: String? = service.userAvatar
+    private val avatarButton = JButton()
+    
     init {
         title = "个人信息"
         init()
@@ -32,25 +39,55 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
     private fun loadData() {
         nicknameField.text = service.username
         ipLabel.text = service.localIp
+        updateAvatarDisplay()
+    }
+    
+    private fun updateAvatarDisplay() {
+        avatarButton.apply {
+            preferredSize = Dimension(80, 80)
+            icon = if (avatarPath != null) {
+                try {
+                    val img = ImageIO.read(File(avatarPath!!))
+                    val scaledImg = img.getScaledInstance(80, 80, Image.SCALE_SMOOTH)
+                    ImageIcon(scaledImg)
+                } catch (e: Exception) {
+                    AllIcons.General.User
+                }
+            } else {
+                AllIcons.General.User
+            }
+            text = if (avatarPath == null) "点击上传" else ""
+            horizontalAlignment = SwingConstants.CENTER
+            verticalAlignment = SwingConstants.CENTER
+            cursor = Cursor(Cursor.HAND_CURSOR)
+        }
     }
     
     override fun createCenterPanel(): JComponent {
         return JPanel(BorderLayout(0, 12)).apply {
             border = JBUI.Borders.empty(16)
-            preferredSize = Dimension(400, 200)
+            preferredSize = Dimension(450, 280)
             
-            // 头像区域（使用刘亦菲头像）
+            // 头像区域
             val avatarPanel = JPanel(BorderLayout()).apply {
+                isOpaque = false
                 border = JBUI.Borders.emptyBottom(16)
                 
-                // 头像标签
-                val avatarLabel = JLabel().apply {
-                    icon = AllIcons.General.User
-                    horizontalAlignment = SwingConstants.CENTER
-                    preferredSize = Dimension(80, 80)
+                // 头像按钮
+                avatarButton.apply {
+                    addActionListener {
+                        chooseAvatar()
+                    }
                 }
                 
-                add(avatarLabel, BorderLayout.CENTER)
+                add(avatarButton, BorderLayout.CENTER)
+                
+                // 提示
+                add(JLabel("点击头像更换图片").apply {
+                    horizontalAlignment = SwingConstants.CENTER
+                    foreground = JBColor.GRAY
+                    font = font.deriveFont(11f)
+                }, BorderLayout.SOUTH)
             }
             add(avatarPanel, BorderLayout.NORTH)
             
@@ -76,7 +113,7 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
                     font = font.deriveFont(Font.BOLD)
                 }, gbc)
                 gbc.gridx = 1
-                ipLabel.foreground = JBColor.GRAY
+                ipLabel.foreground = JBColor(Color(0, 122, 255), Color(100, 150, 255))
                 add(ipLabel, gbc)
                 
                 // 提示信息
@@ -88,6 +125,22 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
                 }, gbc)
             }
             add(infoPanel, BorderLayout.CENTER)
+        }
+    }
+    
+    private fun chooseAvatar() {
+        val fileChooser = JFileChooser().apply {
+            fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
+                "图片文件 (*.jpg, *.jpeg, *.png, *.gif)",
+                "jpg", "jpeg", "png", "gif"
+            )
+            dialogTitle = "选择头像"
+        }
+        
+        if (fileChooser.showOpenDialog(avatarButton) == JFileChooser.APPROVE_OPTION) {
+            val file = fileChooser.selectedFile
+            avatarPath = file.absolutePath
+            updateAvatarDisplay()
         }
     }
     
@@ -107,6 +160,12 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
         if (newNickname.isNotEmpty()) {
             service.updateUsername(newNickname)
         }
+        
+        // 保存头像
+        avatarPath?.let {
+            service.updateUserAvatar(it)
+        }
+        
         super.doOKAction()
     }
     
