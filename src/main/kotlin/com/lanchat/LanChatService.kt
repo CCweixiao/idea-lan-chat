@@ -335,6 +335,16 @@ class LanChatService : Disposable {
 
     fun getChatHistory(chatId: String): List<Message> = _messages.value[chatId] ?: emptyList()
 
+    /**
+     * 清空聊天记录
+     */
+    fun clearChatHistory(chatId: String) {
+        val currentMessages = _messages.value.toMutableMap()
+        currentMessages.remove(chatId)
+        _messages.value = currentMessages
+        DatabaseManager.clearMessages(chatId)
+    }
+
     // =============== Group Management + Sync ===============
 
     data class GroupSyncPayload(

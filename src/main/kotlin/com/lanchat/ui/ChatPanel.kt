@@ -206,6 +206,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             toolbarPanel.isOpaque = false; toolbarPanel.border = JBUI.Borders.emptyBottom(4)
             toolbarPanel.add(createToolbarIcon(AllIcons.General.Web, "发送图片") { sendImage() })
             toolbarPanel.add(createToolbarIcon(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
+            toolbarPanel.add(createToolbarIcon(AllIcons.Actions.Preview, "查看聊天记录") { showChatHistory() })
             add(toolbarPanel, BorderLayout.NORTH)
 
             val inputRow = JPanel(BorderLayout(8, 0)).apply {
@@ -321,6 +322,99 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
         messagePanel.add(Box.createVerticalGlue())
         messagePanel.revalidate(); messagePanel.repaint(); scrollToBottom()
+    }
+
+    /**
+     * 显示聊天记录对话框（类似微信）
+     */
+    private fun showChatHistory() {
+        val chatId = currentPeer?.id ?: currentGroup?.id
+        if (chatId == null) {
+            JOptionPane.showMessageDialog(this, "请先选择一个联系人或群组", "提示", JOptionPane.INFORMATION_MESSAGE)
+            return
+        }
+
+        val messages = service.getChatHistory(chatId)
+        if (messages.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "暂无聊天记录", "聊天记录", JOptionPane.INFORMATION_MESSAGE)
+            return
+        }
+
+        // 创建聊天记录对话框
+        val dialog = JDialog(SwingUtilities.getWindowAncestor(this), "聊天记录", Dialog.ModalityType.MODELESS)
+        dialog.apply {
+            preferredSize = Dimension(500, 600)
+            layout = BorderLayout()
+
+            // 消息列表
+            val historyPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                background = JBColor(Color(250, 250, 250), Color(40, 40, 40))
+            }
+
+            var prevTs = 0L
+            for (msg in messages) {
+                // 时间分隔
+                if (prevTs == 0L || msg.timestamp - prevTs > 5 * 60 * 1000) {
+                    historyPanel.add(JPanel(FlowLayout(FlowLayout.CENTER)).apply {
+                        isOpaque = false
+                        border = JBUI.Borders.empty(6, 0)
+                        add(JLabel(formatTimeSeparator(msg.timestamp)).apply {
+                            font = Font("Microsoft YaHei", Font.PLAIN, 11)
+                            foreground = JBColor.GRAY
+                        })
+                    })
+                }
+                prevTs = msg.timestamp
+
+                // 消息行
+                val isSentByMe = msg.senderId == service.currentUser?.id
+                historyPanel.add(JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    border = JBUI.Borders.empty(4, 12)
+                    add(JLabel("${msg.senderName ?: "未知"}: ${msg.content}").apply {
+                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        foreground = if (isSentByMe) JBColor(Color(7, 193, 96), Color(100, 200, 130)) else JBColor.BLACK
+                    }, BorderLayout.CENTER)
+                    add(JLabel(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp))).apply {
+                        font = Font("Microsoft YaHei", Font.PLAIN, 10)
+                        foreground = JBColor.GRAY
+                    }, BorderLayout.EAST)
+                })
+            }
+
+            add(JScrollPane(historyPanel).apply {
+                horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            }, BorderLayout.CENTER)
+
+            // 底部操作栏
+            val bottomPanel = JPanel(FlowLayout(FlowLayout.RIGHT)).apply {
+                background = JBColor.PanelBackground
+                border = JBUI.Borders.empty(8)
+                add(JButton("清空聊天记录").apply {
+                    foreground = Color(220, 50, 50)
+                    addActionListener {
+                        val confirm = JOptionPane.showConfirmDialog(
+                            dialog, "确定要清空所有聊天记录吗？", "确认", JOptionPane.YES_NO_OPTION
+                        )
+                        if (confirm == JOptionPane.YES_OPTION) {
+                            service.clearChatHistory(chatId)
+                            loadChatHistory(chatId)
+                            dialog.dispose()
+                            JOptionPane.showMessageDialog(this@ChatPanel, "聊天记录已清空", "提示", JOptionPane.INFORMATION_MESSAGE)
+                        }
+                    }
+                })
+                add(JButton("关闭").apply {
+                    addActionListener { dialog.dispose() }
+                })
+            }
+            add(bottomPanel, BorderLayout.SOUTH)
+
+            pack()
+            setLocationRelativeTo(this@ChatPanel)
+        }
+        dialog.isVisible = true
     }
 
     private var lastDisplayedTimestamp = 0L
