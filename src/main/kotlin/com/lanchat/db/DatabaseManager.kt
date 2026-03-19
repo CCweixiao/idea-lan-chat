@@ -136,6 +136,11 @@ object DatabaseManager {
                 stmt.executeUpdate("ALTER TABLE groups ADD COLUMN group_number TEXT DEFAULT ''")
             }
         } catch (_: Exception) { }
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("ALTER TABLE peers ADD COLUMN signature TEXT DEFAULT ''")
+            }
+        } catch (_: Exception) { }
     }
 
     private fun executeUpdate(sql: String) {
@@ -174,14 +179,15 @@ object DatabaseManager {
         try {
             val sql = """
                 INSERT OR REPLACE INTO peers 
-                (id, username, ip_address, port, avatar, is_online, last_seen) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, username, ip_address, port, avatar, signature, is_online, last_seen) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
                 stmt.setString(1, peer.id); stmt.setString(2, peer.username)
                 stmt.setString(3, peer.ipAddress); stmt.setInt(4, peer.port)
-                stmt.setString(5, peer.avatar); stmt.setInt(6, if (peer.isOnline) 1 else 0)
-                stmt.setLong(7, peer.lastSeen); stmt.executeUpdate()
+                stmt.setString(5, peer.avatar); stmt.setString(6, peer.signature)
+                stmt.setInt(7, if (peer.isOnline) 1 else 0)
+                stmt.setLong(8, peer.lastSeen); stmt.executeUpdate()
             }
         } catch (e: Exception) { e.printStackTrace() }
     }
@@ -196,7 +202,9 @@ object DatabaseManager {
                         val peer = Peer(
                             id = rs.getString("id"), username = rs.getString("username"),
                             ipAddress = rs.getString("ip_address"), port = rs.getInt("port"),
-                            avatar = rs.getString("avatar"), isOnline = rs.getInt("is_online") == 1,
+                            avatar = rs.getString("avatar"),
+                            signature = try { rs.getString("signature") } catch (_: Exception) { null },
+                            isOnline = rs.getInt("is_online") == 1,
                             lastSeen = rs.getLong("last_seen")
                         )
                         peers[peer.id] = peer
@@ -211,6 +219,28 @@ object DatabaseManager {
         try {
             connection?.prepareStatement("DELETE FROM peers WHERE id = ?")?.use { stmt ->
                 stmt.setString(1, peerId); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    /**
+     * 清空与指定联系人的聊天记录
+     */
+    fun clearMessages(chatId: String) {
+        try {
+            connection?.prepareStatement("DELETE FROM messages WHERE receiver_id = ? OR sender_id = ?")?.use { stmt ->
+                stmt.setString(1, chatId); stmt.setString(2, chatId); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    /**
+     * 清空所有聊天记录
+     */
+    fun clearAllMessages() {
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("DELETE FROM messages")
             }
         } catch (e: Exception) { e.printStackTrace() }
     }
