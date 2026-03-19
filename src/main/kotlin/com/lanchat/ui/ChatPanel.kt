@@ -81,12 +81,26 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         
         header.add(userInfo, BorderLayout.WEST)
         
-        // 右侧：当前聊天对象信息
-        val peerInfo = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0))
-        peerInfo.isOpaque = false
-        header.add(peerInfo, BorderLayout.EAST)
+        // 右侧：设置按钮
+        val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0))
+        rightPanel.isOpaque = false
+        
+        // 个人信息设置按钮
+        rightPanel.add(createToolbarButton(AllIcons.General.Settings, "个人信息设置") {
+            showProfileDialog()
+        })
+        
+        header.add(rightPanel, BorderLayout.EAST)
         
         return header
+    }
+    
+    private fun showProfileDialog() {
+        val dialog = ProfileDialog(project)
+        if (dialog.showAndGet()) {
+            // 更新显示
+            peerIpLabel.text = service.localIp
+        }
     }
     
     private fun createToolbarButton(icon: Icon, tooltip: String, action: (() -> Unit)? = null): JButton {
