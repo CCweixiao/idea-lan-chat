@@ -66,6 +66,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
     override fun createCenterPanel(): JComponent {
         val tabbedPane = JTabbedPane().apply {
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            addTab("发现附近", createDiscoverTab())
             addTab("搜索联系人", createSearchTab())
             addTab("好友申请", createFriendRequestTab())
             addTab("发送申请", createSendRequestTab())
@@ -76,6 +77,51 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
             border = JBUI.Borders.empty(4)
             preferredSize = Dimension(560, 540)
             add(tabbedPane, BorderLayout.CENTER)
+        }
+    }
+
+    // =============== Tab 0: Discover Nearby ===============
+
+    private fun createDiscoverTab(): JPanel {
+        return JPanel(BorderLayout(0, 8)).apply {
+            border = JBUI.Borders.empty(8)
+            
+            // 说明
+            val headerPanel = JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(JPanel(BorderLayout()).apply {
+                    isOpaque = false
+                    add(JLabel("发现附近的人").apply {
+                        font = Font("Microsoft YaHei", Font.BOLD, 14)
+                    }, BorderLayout.NORTH)
+                    add(JLabel("搜索同一局域网内开启了 LAN Chat 的用户").apply {
+                        font = Font("Microsoft YaHei", Font.PLAIN, 11)
+                        foreground = JBColor.GRAY
+                    }, BorderLayout.SOUTH)
+                }, BorderLayout.WEST)
+                
+                add(JButton("刷新", AllIcons.Actions.Refresh).apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                    addActionListener {
+                        service.refreshPeers()
+                    }
+                }, BorderLayout.EAST)
+            }
+            add(headerPanel, BorderLayout.NORTH)
+            
+            // 打开完整对话框按钮
+            add(JPanel(BorderLayout()).apply {
+                isOpaque = false
+                border = JBUI.Borders.emptyTop(12)
+                
+                add(JButton("打开「发现附近的人」").apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    icon = AllIcons.Actions.Find
+                    addActionListener {
+                        DiscoverPeersDialog(project).show()
+                    }
+                }, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
         }
     }
 
