@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.net.Inet4Address
 import java.net.NetworkInterface
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * LAN Chat 主服务
@@ -24,11 +23,11 @@ class LanChatService : Disposable {
     private var networkManager: NetworkManager? = null
     
     // 联系人列表
-    private val _peers = MutableStateFlow<Map<String, Peer>>(concurrentMapOf())
+    private val _peers = MutableStateFlow<Map<String, Peer>>(emptyMap())
     val peers: StateFlow<Map<String, Peer>> = _peers
     
     // 消息历史
-    private val _messages = MutableStateFlow<Map<String, MutableList<Message>>>(concurrentMapOf())
+    private val _messages = MutableStateFlow<Map<String, MutableList<Message>>>(emptyMap())
     val messages: StateFlow<Map<String, MutableList<Message>>> = _messages
     
     // 当前用户信息
@@ -53,8 +52,6 @@ class LanChatService : Disposable {
         fun getInstance(): LanChatService {
             return ApplicationManager.getApplication().getService(LanChatService::class.java)
         }
-        
-        private fun <K, V> concurrentMapOf(): ConcurrentHashMap<K, V> = ConcurrentHashMap()
     }
     
     init {
@@ -118,7 +115,7 @@ class LanChatService : Disposable {
      * 添加联系人
      */
     private fun addPeer(peer: Peer) {
-        val currentPeers = _peers.value.toMutableMap() as ConcurrentHashMap<String, Peer>
+        val currentPeers = _peers.value.toMutableMap()
         currentPeers[peer.id] = peer
         _peers.value = currentPeers
     }
