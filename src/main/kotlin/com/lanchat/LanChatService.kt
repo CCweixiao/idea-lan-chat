@@ -25,13 +25,21 @@ class LanChatService : Disposable {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var networkManager: NetworkManager? = null
     
-    // 联系人列表
+    // 联系人列表 - 必须在 init 之前初始化
     private val _peers = MutableStateFlow<Map<String, Peer>>(emptyMap())
     val peers: StateFlow<Map<String, Peer>> = _peers
     
-    // 消息历史
+    // 消息历史 - 必须在 init 之前初始化
     private val _messages = MutableStateFlow<Map<String, MutableList<Message>>>(emptyMap())
     val messages: StateFlow<Map<String, MutableList<Message>>> = _messages
+    
+    // 群组 - 必须在 init 之前初始化
+    private val _groups = MutableStateFlow<Map<String, Group>>(emptyMap())
+    val groups: StateFlow<Map<String, Group>> = _groups
+    
+    // 机器人 - 必须在 init 之前初始化
+    private val _bots = MutableStateFlow<Map<String, Bot>>(emptyMap())
+    val bots: StateFlow<Map<String, Bot>> = _bots
     
     // 当前用户信息
     private var _currentUser: Peer? = null
@@ -47,6 +55,11 @@ class LanChatService : Disposable {
     private var _username: String = System.getProperty("user.name", "Anonymous")
     val username: String
         get() = _username
+    
+    // 用户头像
+    private var _userAvatar: String? = null
+    val userAvatar: String?
+        get() = _userAvatar
     
     // 是否已初始化
     private var isInitialized = false
@@ -274,9 +287,6 @@ class LanChatService : Disposable {
     
     // =============== 群组管理 ===============
     
-    private val _groups = MutableStateFlow<Map<String, Group>>(emptyMap())
-    val groups: StateFlow<Map<String, Group>> = _groups
-    
     /**
      * 创建群聊
      */
@@ -427,9 +437,6 @@ class LanChatService : Disposable {
     
     // =============== 机器人管理 ===============
     
-    private val _bots = MutableStateFlow<Map<String, Bot>>(emptyMap())
-    val bots: StateFlow<Map<String, Bot>> = _bots
-    
     /**
      * 创建机器人
      */
@@ -504,10 +511,6 @@ class LanChatService : Disposable {
     }
     
     // =============== 头像管理 ===============
-    
-    private var _userAvatar: String? = null
-    val userAvatar: String?
-        get() = _userAvatar
     
     /**
      * 设置用户头像
