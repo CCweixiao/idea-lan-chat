@@ -1,0 +1,63 @@
+<idea-plugin>
+    <id>com.lanchat.idea-lan-chat</id>
+    <name>LAN Chat</name>
+    <vendor email="jielongping@example.com" url="https://github.com/jielongping/idea-lan-chat">Jie Longping</vendor>
+
+    <description><![CDATA[
+    <h1>LAN Chat - IntelliJ IDEA局域网聊天插件</h1>
+    <p>一个专为开发者设计的局域网聊天插件，支持同事之间的即时通讯，让你在编码时也能轻松摸鱼聊天！</p>
+    <h2>功能特性</h2>
+    <ul>
+        <li>✅ 局域网自动发现同事</li>
+        <li>✅ 即时消息发送</li>
+        <li>✅ 图片发送与预览</li>
+        <li>✅ 文件传输</li>
+        <li>✅ 联系人列表管理</li>
+        <li>✅ 创建群聊</li>
+        <li>✅ 优雅的聊天界面</li>
+    </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+    <h2>1.0.0</h2>
+    <ul>
+        <li>初始版本发布</li>
+        <li>支持局域网用户发现</li>
+        <li>支持文字消息发送</li>
+        <li>支持图片和文件传输</li>
+        <li>支持联系人管理</li>
+        <li>支持群聊功能</li>
+    </ul>
+    ]]></change-notes>
+
+    <!-- please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html on how to target different products -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- 工具窗口 -->
+        <toolWindow id="LAN Chat"
+                    icon="/META-INF/icons/chat.svg"
+                    anchor="right"
+                    secondary="true"
+                    factoryClass="com.lanchat.ui.LanChatToolWindowFactory"/>
+        
+        <!-- 应用服务 -->
+        <applicationService serviceImplementation="com.lanchat.LanChatService"/>
+        
+        <!-- 配置 -->
+        <applicationConfigurable parentId="tools"
+                                 instance="com.lanchat.ui.settings.LanChatSettingsConfigurable"
+                                 id="com.lanchat.settings"
+                                 displayName="LAN Chat"/>
+    </extensions>
+
+    <actions>
+        <!-- 操作定义 -->
+        <action id="com.lanchat.SendFileAction"
+                class="com.lanchat.ui.actions.SendFileAction"
+                text="Send File"
+                description="Send a file to selected contact">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
