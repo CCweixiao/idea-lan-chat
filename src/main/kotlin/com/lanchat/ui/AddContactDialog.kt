@@ -77,7 +77,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         }
         return JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4)
-            preferredSize = Dimension(580, 520)
+            preferredSize = Dimension(620, 480)
             add(tabbedPane, BorderLayout.CENTER)
         }
     }
