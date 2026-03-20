@@ -95,7 +95,10 @@ class LanChatService : Disposable {
 
         _currentUser = Peer(id = userId, username = _username, ipAddress = _localIp, port = 8889)
 
-        _peers.value = DatabaseManager.loadPeers()
+        _peers.value = DatabaseManager.loadPeers().mapValues { (_, peer) ->
+            // 启动时给所有好友重置 lastSeen，避免立刻被判定离线
+            if (peer.isOnline) peer.copy(lastSeen = System.currentTimeMillis()) else peer
+        }
         _messages.value = DatabaseManager.loadMessages(userId)
         _groups.value = DatabaseManager.loadGroups()
         _bots.value = DatabaseManager.loadBots()
@@ -123,6 +126,35 @@ class LanChatService : Disposable {
                     autoAcceptFriendRequests(peer)
                 }
             }
+        }
+
+        // 定时检测离线：90秒没收到心跳的标记为离线
+        scope.launch {
+            while (true) {
+                delay(30_000)
+                checkPeerOnlineStatus()
+            }
+        }
+    }
+
+    /**
+     * 将90秒未收到心跳的好友标记为离线
+     */
+    private fun checkPeerOnlineStatus() {
+        val now = System.currentTimeMillis()
+        val OFFLINE_THRESHOLD = 90_000L
+        val currentPeers = _peers.value.toMutableMap()
+        var changed = false
+        currentPeers.forEach { (id, peer) ->
+            val wasOnline = peer.isOnline
+            val isNowOnline = (now - peer.lastSeen) < OFFLINE_THRESHOLD
+            if (wasOnline != isNowOnline) {
+                currentPeers[id] = peer.copy(isOnline = isNowOnline)
+                changed = true
+            }
+        }
+        if (changed) {
+            _peers.value = currentPeers
         }
     }
 
@@ -316,9 +348,19 @@ class LanChatService : Disposable {
 
     private fun addPeer(peer: Peer) {
         val currentPeers = _peers.value.toMutableMap()
-        currentPeers[peer.id] = peer
+        val existing = currentPeers[peer.id]
+        currentPeers[peer.id] = peer.copy(
+            isOnline = true,
+            lastSeen = System.currentTimeMillis(),
+            // 保留已有的签名等信息
+            signature = existing?.signature ?: peer.signature
+        )
         _peers.value = currentPeers
-        DatabaseManager.savePeer(peer)
+        DatabaseManager.savePeer(peer.copy(
+            isOnline = true,
+            lastSeen = System.currentTimeMillis(),
+            signature = existing?.signature ?: peer.signature
+        ))
     }
 
     fun addManualPeer(ipAddress: String, port: Int, name: String): Boolean {
