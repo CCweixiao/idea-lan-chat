@@ -1090,7 +1090,8 @@ class LanChatService : Disposable {
 
     /**
      * 退出群聊
-     * 发送退群请求给群主，群主收到后将自己从群成员中移除
+     * 成员可以直接退群，广播退群消息给所有群成员
+     * 退群后不再接收群消息，但历史记录保留
      */
     fun leaveGroup(groupId: String): Boolean {
         val userId = _currentUser?.id ?: return false
@@ -1100,7 +1101,16 @@ class LanChatService : Disposable {
         if (group.isOwner(userId)) return false
         if (!group.isMember(userId)) return false
 
-        // 发送退群消息给群主
+        // 本地立即从群组中移除
+        val m = _groups.value.toMutableMap()
+        val updatedGroup = group.copy(
+            memberIds = group.memberIds.filter { it != userId }.toMutableList()
+        )
+        m[groupId] = updatedGroup
+        _groups.value = m
+        DatabaseManager.saveGroup(updatedGroup)
+
+        // 广播退群消息给所有群成员（不仅是群主）
         val payload = GroupLeavePayload(
             groupId = groupId,
             leaverId = userId,
@@ -1109,27 +1119,18 @@ class LanChatService : Disposable {
         val message = Message(
             type = MessageType.GROUP_LEAVE,
             senderId = userId,
-            receiverId = group.ownerId,
+            receiverId = groupId,  // 使用群ID而不是群主ID
             content = gson.toJson(payload),
-            senderName = _username
+            senderName = _username,
+            groupId = groupId  // 标记为群组消息
         )
 
         scope.launch {
-            val ownerTarget = resolvePeerTarget(group.ownerId)
-            if (ownerTarget != null) {
-                networkManager?.sendMessage(message, ownerTarget.first, ownerTarget.second)
+            // 发送给所有在线的群成员
+            val targets = getGroupMemberTargets(groupId)
+            if (targets.isNotEmpty()) {
+                networkManager?.sendToMultiple(message, targets)
             }
-        }
-
-        // 本地立即从群组中移除（显示效果）
-        // 但保留历史记录
-        val m = _groups.value.toMutableMap()
-        val localGroup = m[groupId]?.copy(
-            memberIds = group.memberIds.filter { it != userId }.toMutableList()
-        )
-        if (localGroup != null) {
-            m[groupId] = localGroup
-            _groups.value = m
         }
         return true
     }
@@ -1142,11 +1143,19 @@ class LanChatService : Disposable {
         val group = _groups.value[payload.groupId] ?: return
         val userId = _currentUser?.id ?: return
 
-        // 只有群主处理退群请求
-        if (!group.isOwner(userId)) return
+        // 如果是自己退群的消息，忽略（因为已经在 leaveGroup 中处理了）
+        if (payload.leaverId == userId) return
 
-        // 移除成员
-        removeGroupMember(payload.groupId, payload.leaverId)
+        // 其他成员收到退群消息，从群组中移除该成员
+        if (group.isOwner(userId) || group.isMember(userId)) {
+            val m = _groups.value.toMutableMap()
+            val updatedGroup = group.copy(
+                memberIds = group.memberIds.filter { it != payload.leaverId }.toMutableList()
+            )
+            m[payload.groupId] = updatedGroup
+            _groups.value = m
+            DatabaseManager.saveGroup(updatedGroup)
+        }
     }
 
     // =============== User Settings ===============
