@@ -218,7 +218,7 @@ class LanChatService : Disposable {
         if (current.containsKey(chatId) && current[chatId]!! > 0) {
             current[chatId] = 0
             _unreadCounts.value = current
-            DatabaseManager.markMessagesAsRead(chatId, userId)
+            DatabaseManager.markMessagesAsRead(chatId, userId, userName)
 
             // 更新内存中的消息状态
             val msgs = _messages.value.toMutableMap()

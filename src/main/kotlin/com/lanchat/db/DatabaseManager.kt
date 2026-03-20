@@ -332,9 +332,9 @@ object DatabaseManager {
     /**
      * 标记指定聊天的所有消息为已读
      */
-    fun markMessagesAsRead(chatId: String, currentUserId: String) {
+    fun markMessagesAsRead(chatId: String, currentUserId: String, currentUserName: String = "") {
         try {
-            // 标记私聊消息（对方发来的）
+            // 标记私聊消息（对方发来的）— 私聊仍用 is_read
             connection?.prepareStatement(
                 "UPDATE messages SET is_read = 1 WHERE sender_id = ? AND receiver_id = ? AND is_read = 0"
             )?.use { stmt ->
@@ -342,19 +342,43 @@ object DatabaseManager {
                 stmt.setString(2, currentUserId)
                 stmt.executeUpdate()
             }
-            // 标记群聊消息
+            // 标记群聊消息 — 用 read_by_user_ids 实现每用户独立已读
             connection?.prepareStatement(
-                "UPDATE messages SET is_read = 1 WHERE group_id = ? AND sender_id != ? AND is_read = 0"
+                "SELECT id, read_by_user_ids, read_by_user_names FROM messages WHERE group_id = ? AND sender_id != ?"
             )?.use { stmt ->
                 stmt.setString(1, chatId)
                 stmt.setString(2, currentUserId)
-                stmt.executeUpdate()
+                stmt.executeQuery()?.use { rs ->
+                    val updateStmt = connection?.prepareStatement(
+                        "UPDATE messages SET read_by_user_ids = ?, read_by_user_names = ? WHERE id = ?"
+                    )
+                    while (rs.next()) {
+                        val msgId = rs.getLong("id")
+                        val readByUserIds = gson.fromJson(rs.getString("read_by_user_ids"),
+                            object : TypeToken<MutableList<String>>() {}.type) as? MutableList<String> ?: mutableListOf()
+                        if (!readByUserIds.contains(currentUserId)) {
+                            readByUserIds.add(currentUserId)
+                            val readByUserNames = gson.fromJson(rs.getString("read_by_user_names"),
+                                object : TypeToken<MutableList<String>>() {}.type) as? MutableList<String> ?: mutableListOf()
+                            if (currentUserName.isNotBlank() && !readByUserNames.contains(currentUserName)) {
+                                readByUserNames.add(currentUserName)
+                            }
+                            updateStmt?.setString(1, gson.toJson(readByUserIds))
+                            updateStmt?.setString(2, gson.toJson(readByUserNames))
+                            updateStmt?.setLong(3, msgId)
+                            updateStmt?.addBatch()
+                        }
+                    }
+                    updateStmt?.executeBatch()
+                }
             }
         } catch (e: Exception) { e.printStackTrace() }
     }
 
     /**
      * 获取未读消息计数
+     * 私聊：使用 is_read 字段（全局）
+     * 群聊：使用 read_by_user_ids（每用户独立）
      */
     fun getUnreadCounts(currentUserId: String): Map<String, Int> {
         val counts = ConcurrentHashMap<String, Int>()
@@ -371,11 +395,12 @@ object DatabaseManager {
                     }
                 }
             }
-            // 群聊未读
+            // 群聊未读 — 检查 read_by_user_ids 不包含当前用户的消息
             connection?.prepareStatement(
-                "SELECT group_id, COUNT(*) as cnt FROM messages WHERE group_id IS NOT NULL AND sender_id != ? AND is_read = 0 GROUP BY group_id"
+                "SELECT group_id, COUNT(*) as cnt FROM messages WHERE group_id IS NOT NULL AND sender_id != ? AND (read_by_user_ids IS NULL OR read_by_user_ids NOT LIKE ?) GROUP BY group_id"
             )?.use { stmt ->
                 stmt.setString(1, currentUserId)
+                stmt.setString(2, "%\"$currentUserId\"%")
                 stmt.executeQuery()?.use { rs ->
                     while (rs.next()) {
                         val groupId = rs.getString("group_id")
