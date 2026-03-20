@@ -9,6 +9,7 @@ import com.lanchat.message.Message
 import com.lanchat.message.MessageType
 import com.lanchat.network.*
 import com.lanchat.ui.settings.LanChatSettings
+import com.lanchat.util.CryptoManager
 import com.lanchat.util.UserIdGenerator
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +42,7 @@ class LanChatService : Disposable {
 
     private val _groupRequests = MutableStateFlow<Map<String, GroupRequest>>(emptyMap())
     val groupRequests: StateFlow<Map<String, GroupRequest>> = _groupRequests
+    private val inviteAckReceived = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     private val _unreadCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val unreadCounts: StateFlow<Map<String, Int>> = _unreadCounts
@@ -119,6 +121,11 @@ class LanChatService : Disposable {
 
         migrateGroupNumbers()
 
+        val encryptionKey = DatabaseManager.getSetting("encryptionKey", "")
+        CryptoManager.initialize(encryptionKey.ifEmpty { null })
+        val encryptionEnabled = DatabaseManager.getSetting("encryptionEnabled", "true")
+        CryptoManager.isEnabled = encryptionEnabled != "false"
+
         networkManager = NetworkManager(
             udpPort = settings.getUdpPort(),
             tcpPort = settings.getTcpPort()
@@ -156,33 +163,56 @@ class LanChatService : Disposable {
             }
         }
 
-        // 定时检测离线：90秒没收到心跳的标记为离线
         scope.launch {
             while (true) {
-                delay(30_000)
+                delay(20_000)
                 checkPeerOnlineStatus()
             }
         }
     }
 
     /**
-     * 将90秒未收到心跳的好友标记为离线
+     * 主动检测好友在线状态：
+     * 1. 对所有好友发起 TCP 探测（并行，2秒超时）
+     * 2. 探测成功 → 标记在线，更新 lastSeen
+     * 3. 探测失败且超过阈值 → 标记离线
      */
     private fun checkPeerOnlineStatus() {
         val now = System.currentTimeMillis()
-        val OFFLINE_THRESHOLD = 90_000L
-        val currentPeers = _peers.value.toMutableMap()
-        var changed = false
-        currentPeers.forEach { (id, peer) ->
-            val wasOnline = peer.isOnline
-            val isNowOnline = (now - peer.lastSeen) < OFFLINE_THRESHOLD
-            if (wasOnline != isNowOnline) {
-                currentPeers[id] = peer.copy(isOnline = isNowOnline)
-                changed = true
+        val offlineThreshold = 45_000L
+        val currentPeers = _peers.value
+        if (currentPeers.isEmpty()) return
+
+        scope.launch {
+            val results = currentPeers.values.map { peer ->
+                async(Dispatchers.IO) {
+                    val online = try {
+                        networkManager?.probePeer(peer.ipAddress, peer.port, 2000) != null
+                    } catch (_: Exception) { false }
+                    peer.id to online
+                }
+            }.awaitAll()
+
+            val updated = _peers.value.toMutableMap()
+            var changed = false
+            results.forEach { (id, probeSuccess) ->
+                val peer = updated[id] ?: return@forEach
+                if (probeSuccess) {
+                    if (!peer.isOnline || (now - peer.lastSeen) > 10_000) {
+                        updated[id] = peer.copy(isOnline = true, lastSeen = System.currentTimeMillis())
+                        changed = true
+                    }
+                } else {
+                    if (peer.isOnline && (now - peer.lastSeen) > offlineThreshold) {
+                        updated[id] = peer.copy(isOnline = false)
+                        changed = true
+                    }
+                }
             }
-        }
-        if (changed) {
-            _peers.value = currentPeers
+            if (changed) {
+                _peers.value = updated
+                updated.forEach { (id, peer) -> DatabaseManager.savePeer(peer) }
+            }
         }
     }
 
@@ -190,11 +220,7 @@ class LanChatService : Disposable {
         val m = _groups.value.toMutableMap()
         var changed = false
         m.values.filter { it.groupNumber.isEmpty() }.forEach { group ->
-            val updated = Group(
-                id = group.id, name = group.name, ownerId = group.ownerId,
-                memberIds = group.memberIds, createdAt = group.createdAt,
-                avatar = group.avatar, groupNumber = generateUniqueGroupNumber()
-            )
+            val updated = group.copy(groupNumber = generateUniqueGroupNumber())
             m[group.id] = updated
             DatabaseManager.saveGroup(updated)
             changed = true
@@ -241,8 +267,9 @@ class LanChatService : Disposable {
     }
 
     private fun handleReceivedMessage(message: Message) {
-        // FRIEND_REQUEST 消息需要处理自己发给自己的情况（用于测试）
-        if (message.senderId == _currentUser?.id && message.type != MessageType.FRIEND_REQUEST) return
+        if (message.senderId == _currentUser?.id
+            && message.type != MessageType.FRIEND_REQUEST
+            && message.type != MessageType.FRIEND_RESPONSE) return
         when (message.type) {
             MessageType.GROUP_SYNC -> handleGroupSync(message)
             MessageType.GROUP_LEAVE -> handleGroupLeave(message)
@@ -250,7 +277,9 @@ class LanChatService : Disposable {
             MessageType.FRIEND_RESPONSE -> handleFriendResponse(message)
             MessageType.GROUP_INVITE -> handleGroupInvite(message)
             MessageType.GROUP_INVITE_RESPONSE -> handleGroupInviteResponse(message)
-            MessageType.MESSAGE_READ_ACK -> handleMessageReadAck(message)
+            MessageType.MESSAGE_READ_ACK -> {
+                // 已关闭群消息回执功能：忽略回执消息
+            }
             else -> {
                 // 对于群聊消息，检查用户是否还在群中
                 if (isGroupMessage(message) && !isMemberOfGroup(message.groupId)) {
@@ -298,11 +327,7 @@ class LanChatService : Disposable {
             }
             _messages.value = msgs
             
-            // 如果是群聊，广播已读回执给其他成员
-            val group = _groups.value[chatId]
-            if (group != null) {
-                broadcastReadAck(chatId, userId, userName)
-            }
+            // 已关闭群消息回执功能：不再广播已读回执
         }
     }
 
@@ -437,6 +462,19 @@ class LanChatService : Disposable {
     fun removePeer(peerId: String) {
         val m = _peers.value.toMutableMap(); m.remove(peerId); _peers.value = m
         DatabaseManager.deletePeer(peerId)
+
+        // 从所有群中移除该成员
+        val gm = _groups.value.toMutableMap()
+        var groupChanged = false
+        gm.values.forEach { group ->
+            if (group.memberIds.contains(peerId)) {
+                group.memberIds.remove(peerId)
+                DatabaseManager.saveGroup(group)
+                groupChanged = true
+            }
+        }
+        if (groupChanged) _groups.value = gm.toMap()
+
         // 添加到黑名单，防止自动加回
         val blocked = _blockedPeerIds.value.toMutableSet()
         blocked.add(peerId)
@@ -521,6 +559,7 @@ class LanChatService : Disposable {
         mentionedUserIds: List<String> = emptyList(), mentionAll: Boolean = false
     ) {
         val senderId = _currentUser?.id ?: return
+        if (isUserMuted(groupId, senderId)) return
         val type = when {
             mentionAll -> MessageType.MENTION_ALL
             mentionedUserIds.isNotEmpty() -> MessageType.MENTION_MEMBER
@@ -635,7 +674,9 @@ class LanChatService : Disposable {
         val ownerName: String? = null,
         val memberIds: List<String>? = null,
         val createdAt: Long? = null,
-        val targetMemberId: String? = null
+        val targetMemberId: String? = null,
+        val mutedMembers: Map<String, Long>? = null,
+        val globalMute: Boolean? = null
     )
 
     private fun broadcastGroupSync(payload: GroupSyncPayload, targets: List<Pair<String, Int>>) {
@@ -692,11 +733,7 @@ class LanChatService : Disposable {
         val group = m[groupId] ?: return
         if (!group.isOwner(userId)) return
 
-        val updated = Group(
-            id = group.id, name = newName, ownerId = group.ownerId,
-            memberIds = group.memberIds, createdAt = group.createdAt,
-            avatar = group.avatar, groupNumber = group.groupNumber
-        )
+        val updated = group.copy(name = newName)
         m[groupId] = updated; _groups.value = m
         DatabaseManager.saveGroup(updated)
 
@@ -735,6 +772,24 @@ class LanChatService : Disposable {
                 targetMemberId = newMemberId, memberIds = group.memberIds
             ), existingTargets
         )
+
+        // 群内系统消息：成员入群
+        val memberName = _peers.value[newMemberId]?.username ?: "新成员"
+        val systemNotice = Message(
+            type = MessageType.SYSTEM,
+            senderId = _currentUser?.id ?: "",
+            receiverId = groupId,
+            groupId = groupId,
+            content = "$memberName 已成功入群",
+            senderName = _username
+        )
+        addMessageToHistory(systemNotice)
+        scope.launch {
+            val allTargets = getGroupMemberTargets(groupId)
+            if (allTargets.isNotEmpty()) {
+                networkManager?.sendToMultiple(systemNotice, allTargets)
+            }
+        }
         return true
     }
 
@@ -742,6 +797,7 @@ class LanChatService : Disposable {
         val userId = _currentUser?.id ?: return false
         val m = _groups.value.toMutableMap()
         val group = m[groupId] ?: return false
+        val removedName = _peers.value[memberId]?.username ?: "未知用户"
         if (!group.removeMember(userId, memberId)) return false
 
         m[groupId] = group; _groups.value = m
@@ -761,12 +817,119 @@ class LanChatService : Disposable {
                 targetMemberId = memberId, memberIds = group.memberIds
             ), remainingTargets
         )
+
+        val sysMsg = Message(
+            type = MessageType.SYSTEM, senderId = userId, receiverId = groupId,
+            groupId = groupId, content = "$removedName 被移除群聊", senderName = _username
+        )
+        addMessageToHistory(sysMsg)
+        notifyMessageListeners(sysMsg)
+        scope.launch {
+            if (remainingTargets.isNotEmpty()) {
+                networkManager?.sendToMultiple(sysMsg, remainingTargets)
+            }
+        }
         return true
     }
 
     fun isGroupOwner(groupId: String): Boolean {
         val userId = _currentUser?.id ?: return false
         return _groups.value[groupId]?.isOwner(userId) ?: false
+    }
+
+    fun isUserMuted(groupId: String, userId: String? = null): Boolean {
+        val uid = userId ?: _currentUser?.id ?: return false
+        return _groups.value[groupId]?.isMuted(uid) ?: false
+    }
+
+    /**
+     * @param durationMs 禁言时长（毫秒），-1 表示永久
+     */
+    fun muteUser(groupId: String, memberId: String, durationMs: Long) {
+        val userId = _currentUser?.id ?: return
+        val m = _groups.value.toMutableMap()
+        val group = m[groupId] ?: return
+        if (!group.isOwner(userId)) return
+
+        val unmuteAt = if (durationMs == -1L) -1L else System.currentTimeMillis() + durationMs
+        group.mutedMembers[memberId] = unmuteAt
+        m[groupId] = group; _groups.value = m
+        DatabaseManager.saveGroup(group)
+
+        val memberName = _peers.value[memberId]?.username ?: "用户"
+        val durationText = formatMuteDuration(durationMs)
+        val sysMsg = Message(
+            type = MessageType.SYSTEM, senderId = userId, receiverId = groupId,
+            groupId = groupId, content = "$memberName 已被禁言$durationText", senderName = _username
+        )
+        addMessageToHistory(sysMsg); notifyMessageListeners(sysMsg)
+
+        val targets = getGroupMemberTargets(groupId)
+        broadcastGroupSync(GroupSyncPayload(
+            action = "MUTE_UPDATE", groupId = groupId,
+            mutedMembers = group.mutedMembers.toMap(), globalMute = group.globalMute
+        ), targets)
+        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(sysMsg, targets) }
+    }
+
+    fun unmuteUser(groupId: String, memberId: String) {
+        val userId = _currentUser?.id ?: return
+        val m = _groups.value.toMutableMap()
+        val group = m[groupId] ?: return
+        if (!group.isOwner(userId)) return
+
+        group.mutedMembers.remove(memberId)
+        m[groupId] = group; _groups.value = m
+        DatabaseManager.saveGroup(group)
+
+        val memberName = _peers.value[memberId]?.username ?: "用户"
+        val sysMsg = Message(
+            type = MessageType.SYSTEM, senderId = userId, receiverId = groupId,
+            groupId = groupId, content = "$memberName 已被解除禁言", senderName = _username
+        )
+        addMessageToHistory(sysMsg); notifyMessageListeners(sysMsg)
+
+        val targets = getGroupMemberTargets(groupId)
+        broadcastGroupSync(GroupSyncPayload(
+            action = "MUTE_UPDATE", groupId = groupId,
+            mutedMembers = group.mutedMembers.toMap(), globalMute = group.globalMute
+        ), targets)
+        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(sysMsg, targets) }
+    }
+
+    fun setGlobalMute(groupId: String, muted: Boolean) {
+        val userId = _currentUser?.id ?: return
+        val m = _groups.value.toMutableMap()
+        val group = m[groupId] ?: return
+        if (!group.isOwner(userId)) return
+
+        val updated = group.copy(globalMute = muted)
+        m[groupId] = updated; _groups.value = m
+        DatabaseManager.saveGroup(updated)
+
+        val sysMsg = Message(
+            type = MessageType.SYSTEM, senderId = userId, receiverId = groupId,
+            groupId = groupId, content = if (muted) "群主已开启全员禁言" else "群主已关闭全员禁言",
+            senderName = _username
+        )
+        addMessageToHistory(sysMsg); notifyMessageListeners(sysMsg)
+
+        val targets = getGroupMemberTargets(groupId)
+        broadcastGroupSync(GroupSyncPayload(
+            action = "MUTE_UPDATE", groupId = groupId,
+            mutedMembers = updated.mutedMembers.toMap(), globalMute = updated.globalMute
+        ), targets)
+        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(sysMsg, targets) }
+    }
+
+    private fun formatMuteDuration(durationMs: Long): String {
+        if (durationMs == -1L) return "（永久）"
+        val minutes = durationMs / 60_000
+        return when {
+            minutes < 60 -> "（${minutes}分钟）"
+            minutes < 1440 -> "（${minutes / 60}小时）"
+            else -> "（${minutes / 1440}天）"
+        }
     }
 
     fun getGroup(groupId: String): Group? = _groups.value[groupId]
@@ -815,12 +978,7 @@ class LanChatService : Disposable {
             }
             "UPDATE" -> {
                 val group = m[payload.groupId] ?: return
-                val updated = Group(
-                    id = group.id, name = payload.groupName ?: group.name,
-                    ownerId = group.ownerId, memberIds = group.memberIds,
-                    createdAt = group.createdAt, avatar = group.avatar,
-                    groupNumber = group.groupNumber
-                )
+                val updated = group.copy(name = payload.groupName ?: group.name)
                 m[payload.groupId] = updated; _groups.value = m
                 DatabaseManager.saveGroup(updated)
             }
@@ -846,6 +1004,15 @@ class LanChatService : Disposable {
                     DatabaseManager.saveGroup(group)
                 }
             }
+            "MUTE_UPDATE" -> {
+                val group = m[payload.groupId] ?: return
+                val updated = group.copy(
+                    mutedMembers = payload.mutedMembers?.toMutableMap() ?: group.mutedMembers,
+                    globalMute = payload.globalMute ?: group.globalMute
+                )
+                m[payload.groupId] = updated; _groups.value = m
+                DatabaseManager.saveGroup(updated)
+            }
         }
     }
 
@@ -868,13 +1035,17 @@ class LanChatService : Disposable {
         val leaverName: String
     )
 
-    fun inviteToGroup(groupId: String, peerId: String) {
-        val cu = _currentUser ?: return
-        val group = _groups.value[groupId] ?: return
-        if (!group.isOwner(cu.id)) return
-        if (group.memberIds.contains(peerId)) return
+    /**
+     * 邀请用户入群，等待对方 ACK（最多10秒）
+     * @return true=对方已收到并创建邀请记录, false=超时未收到反馈
+     */
+    suspend fun inviteToGroup(groupId: String, peerId: String): Boolean {
+        val cu = _currentUser ?: return false
+        val group = _groups.value[groupId] ?: return false
+        if (!group.isOwner(cu.id)) return false
+        if (group.memberIds.contains(peerId)) return false
 
-        val peer = _peers.value[peerId] ?: return
+        val peer = _peers.value[peerId] ?: return false
         val request = GroupRequest(
             groupId = groupId, groupNumber = group.groupNumber,
             groupName = group.name, requesterId = cu.id,
@@ -896,7 +1067,15 @@ class LanChatService : Disposable {
             type = MessageType.GROUP_INVITE, senderId = cu.id,
             receiverId = peerId, content = gson.toJson(payload), senderName = _username
         )
-        scope.launch { networkManager?.sendMessage(msg, peer.ipAddress, peer.port) }
+        networkManager?.sendMessage(msg, peer.ipAddress, peer.port)
+
+        // 等待 ACK，最多 10 秒
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < 10_000) {
+            if (inviteAckReceived.remove(request.id) == true) return true
+            delay(200)
+        }
+        return false
     }
 
     fun requestJoinGroup(groupId: String, greeting: String = "") {
@@ -1022,9 +1201,26 @@ class LanChatService : Disposable {
                     targetId = _currentUser?.id ?: "", type = GroupRequestType.INVITE,
                     message = payload.message
                 )
-                val m = _groupRequests.value.toMutableMap()
-                m[request.id] = request; _groupRequests.value = m
+                val rm = _groupRequests.value.toMutableMap()
+                rm[request.id] = request; _groupRequests.value = rm
                 DatabaseManager.saveGroupRequest(request)
+
+                // 收到邀请后发送 ACK 给邀请方
+                val cu = _currentUser ?: return
+                val ackPayload = GroupInvitePayload(
+                    action = "INVITE_ACK", groupId = payload.groupId,
+                    requestId = payload.requestId, requesterId = cu.id,
+                    requesterName = _username
+                )
+                val ackMsg = Message(
+                    type = MessageType.GROUP_INVITE_RESPONSE, senderId = cu.id,
+                    receiverId = payload.requesterId, content = gson.toJson(ackPayload),
+                    senderName = _username
+                )
+                val target = resolvePeerTarget(payload.requesterId)
+                if (target != null) {
+                    scope.launch { networkManager?.sendMessage(ackMsg, target.first, target.second) }
+                }
             }
             "JOIN_REQUEST" -> {
                 val request = GroupRequest(
@@ -1049,8 +1245,10 @@ class LanChatService : Disposable {
         } catch (_: Exception) { return }
 
         when (payload.action) {
+            "INVITE_ACK" -> {
+                inviteAckReceived[payload.requestId] = true
+            }
             "ACCEPT_INVITE" -> {
-                // The invitee accepted; as the owner, add them to the group
                 addGroupMember(payload.groupId, payload.requesterId)
                 updateGroupRequestStatus(payload.requestId, GroupRequestStatus.ACCEPTED)
             }
@@ -1093,24 +1291,19 @@ class LanChatService : Disposable {
      * 成员可以直接退群，广播退群消息给所有群成员
      * 退群后不再接收群消息，但历史记录保留
      */
-    fun leaveGroup(groupId: String): Boolean {
-        val userId = _currentUser?.id ?: return false
-        val group = _groups.value[groupId] ?: return false
+    enum class LeaveGroupResult { SUCCESS, IS_OWNER, NOT_MEMBER, ERROR }
 
-        // 只有群成员可以退群，群主不能退群（只能解散群）
-        if (group.isOwner(userId)) return false
-        if (!group.isMember(userId)) return false
+    fun leaveGroup(groupId: String): LeaveGroupResult {
+        val userId = _currentUser?.id ?: return LeaveGroupResult.ERROR
+        val group = _groups.value[groupId] ?: return LeaveGroupResult.ERROR
 
-        // 本地立即从群组中移除
-        val m = _groups.value.toMutableMap()
-        val updatedGroup = group.copy(
-            memberIds = group.memberIds.filter { it != userId }.toMutableList()
-        )
-        m[groupId] = updatedGroup
-        _groups.value = m
-        DatabaseManager.saveGroup(updatedGroup)
+        if (group.isOwner(userId)) return LeaveGroupResult.IS_OWNER
+        if (!group.isMember(userId)) return LeaveGroupResult.NOT_MEMBER
 
-        // 广播退群消息给所有群成员（不仅是群主）
+        // 先获取群成员目标（退群前，这样还能拿到成员信息）
+        val targets = getGroupMemberTargets(groupId)
+
+        // 广播退群消息给所有群成员
         val payload = GroupLeavePayload(
             groupId = groupId,
             leaverId = userId,
@@ -1119,20 +1312,26 @@ class LanChatService : Disposable {
         val message = Message(
             type = MessageType.GROUP_LEAVE,
             senderId = userId,
-            receiverId = groupId,  // 使用群ID而不是群主ID
+            receiverId = groupId,
             content = gson.toJson(payload),
             senderName = _username,
-            groupId = groupId  // 标记为群组消息
+            groupId = groupId
         )
 
         scope.launch {
-            // 发送给所有在线的群成员
-            val targets = getGroupMemberTargets(groupId)
             if (targets.isNotEmpty()) {
                 networkManager?.sendToMultiple(message, targets)
             }
         }
-        return true
+
+        // 本地删除群和聊天记录
+        val m = _groups.value.toMutableMap()
+        m.remove(groupId)
+        _groups.value = m
+        DatabaseManager.deleteGroup(groupId)
+        clearChatHistory(groupId)
+
+        return LeaveGroupResult.SUCCESS
     }
 
     private fun handleGroupLeave(message: Message) {
@@ -1155,6 +1354,18 @@ class LanChatService : Disposable {
             m[payload.groupId] = updatedGroup
             _groups.value = m
             DatabaseManager.saveGroup(updatedGroup)
+
+            // 其他成员收到退群事件时插入系统消息
+            addMessageToHistory(
+                Message(
+                    type = MessageType.SYSTEM,
+                    senderId = payload.leaverId,
+                    receiverId = payload.groupId,
+                    groupId = payload.groupId,
+                    content = "${payload.leaverName} 已退群",
+                    senderName = payload.leaverName
+                )
+            )
         }
     }
 
@@ -1168,6 +1379,20 @@ class LanChatService : Disposable {
     }
 
     fun refreshPeers() { networkManager?.sendDiscovery() }
+
+    fun updateEncryptionKey(passphrase: String) {
+        DatabaseManager.saveSetting("encryptionKey", passphrase)
+        CryptoManager.updatePassphrase(passphrase)
+    }
+
+    fun setEncryptionEnabled(enabled: Boolean) {
+        DatabaseManager.saveSetting("encryptionEnabled", if (enabled) "true" else "false")
+        CryptoManager.isEnabled = enabled
+    }
+
+    fun isEncryptionEnabled(): Boolean = CryptoManager.isEnabled
+
+    fun getEncryptionKey(): String = DatabaseManager.getSetting("encryptionKey", "")
 
     /**
      * 刷新用户 ID
@@ -1252,7 +1477,10 @@ class LanChatService : Disposable {
 
     fun sendFriendRequest(targetIp: String, targetPort: Int = 8889, greeting: String = "") {
         val cu = _currentUser ?: return
-        if (isPeerExists(targetIp, targetPort)) return
+        val hasPending = _friendRequests.value.values.any {
+            it.status == FriendRequestStatus.PENDING_SENT && it.toIp == targetIp && it.toPort == targetPort
+        }
+        if (hasPending) return
 
         val request = FriendRequest(
             fromUserId = cu.id, fromUsername = _username,
@@ -1273,7 +1501,11 @@ class LanChatService : Disposable {
             type = MessageType.FRIEND_REQUEST, senderId = cu.id,
             receiverId = "", content = gson.toJson(payload), senderName = _username
         )
-        scope.launch { networkManager?.sendMessage(msg, targetIp, targetPort) }
+        scope.launch {
+            networkManager?.sendMessage(msg, targetIp, targetPort)
+            delay(800)
+            networkManager?.sendMessage(msg, targetIp, targetPort)
+        }
     }
 
     fun acceptFriendRequest(requestId: String) {
@@ -1283,8 +1515,15 @@ class LanChatService : Disposable {
         m[requestId] = updated; _friendRequests.value = m
         DatabaseManager.saveFriendRequest(updated)
 
-        // 使用对方的真实 userId
-        addManualPeer(request.fromIp, request.fromPort, request.fromUsername, request.fromUserId)
+        val peer = Peer(
+            id = request.fromUserId,
+            username = request.fromUsername,
+            ipAddress = request.fromIp,
+            port = request.fromPort,
+            isOnline = true
+        )
+        addPeer(peer)
+        unblockPeer(request.fromUserId)
 
         val cu = _currentUser ?: return
         val payload = FriendRequestPayload(
@@ -1295,7 +1534,12 @@ class LanChatService : Disposable {
             type = MessageType.FRIEND_RESPONSE, senderId = cu.id,
             receiverId = request.fromUserId, content = gson.toJson(payload), senderName = _username
         )
-        scope.launch { networkManager?.sendMessage(msg, request.fromIp, request.fromPort) }
+        scope.launch {
+            networkManager?.sendMessage(msg, request.fromIp, request.fromPort)
+            // 再发一次确保送达（TCP 可能因网络延迟丢失）
+            delay(500)
+            networkManager?.sendMessage(msg, request.fromIp, request.fromPort)
+        }
     }
 
     fun rejectFriendRequest(requestId: String) {
@@ -1322,6 +1566,13 @@ class LanChatService : Disposable {
             gson.fromJson(message.content, FriendRequestPayload::class.java)
         } catch (_: Exception) { return }
 
+        // 防重复：如果已存在来自同一用户的待处理申请，忽略
+        val existing = _friendRequests.value.values.any {
+            it.fromUserId == payload.fromUserId
+                && (it.status == FriendRequestStatus.PENDING_RECEIVED || it.status == FriendRequestStatus.ACCEPTED)
+        }
+        if (existing) return
+
         val request = FriendRequest(
             fromUserId = payload.fromUserId, fromUsername = payload.fromUsername,
             fromIp = payload.fromIp, fromPort = payload.fromPort,
@@ -1341,15 +1592,23 @@ class LanChatService : Disposable {
             "ACCEPT" -> {
                 val m = _friendRequests.value.toMutableMap()
                 val sentRequest = m.values.find {
-                    it.status == FriendRequestStatus.PENDING_SENT && it.toIp == payload.fromIp
+                    (it.status == FriendRequestStatus.PENDING_SENT || it.status == FriendRequestStatus.ACCEPTED)
+                        && it.toIp == payload.fromIp
                 }
-                if (sentRequest != null) {
+                if (sentRequest != null && sentRequest.status == FriendRequestStatus.PENDING_SENT) {
                     val updated = sentRequest.copy(status = FriendRequestStatus.ACCEPTED)
                     m[sentRequest.id] = updated; _friendRequests.value = m
                     DatabaseManager.saveFriendRequest(updated)
                 }
-                // 使用对方的真实 userId
-                addManualPeer(payload.fromIp, payload.fromPort, payload.fromUsername, payload.fromUserId)
+                val peer = Peer(
+                    id = payload.fromUserId,
+                    username = payload.fromUsername,
+                    ipAddress = payload.fromIp,
+                    port = payload.fromPort,
+                    isOnline = true
+                )
+                addPeer(peer)
+                unblockPeer(payload.fromUserId)
             }
             "REJECT" -> {
                 val m = _friendRequests.value.toMutableMap()
