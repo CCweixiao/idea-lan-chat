@@ -46,11 +46,8 @@ object ThemeManager {
 
     // =============== 消息气泡 ===============
 
-    /** 我发送的消息气泡 */
-    val sentBubbleColor: Color get() = if (isDark())
-        JBColor(Color(200, 220, 200), Color(60, 70, 65))
-    else
-        JBColor(Color(149, 236, 105), Color(76, 141, 54))
+    /** 我发送的消息气泡（与对方一致） */
+    val sentBubbleColor: Color get() = receivedBubbleColor
 
     /** 对方发送的消息气泡 */
     val receivedBubbleColor: Color get() = if (isDark())
@@ -103,6 +100,16 @@ object ThemeManager {
 
     /** 危险按钮文字 */
     val dangerTextColor: Color get() = JBColor(Color(220, 50, 50), Color(200, 100, 100))
+
+    // =============== 发送按钮（低调风格）===============
+
+    val sendButtonColor: Color get() = JBColor(Color(228, 228, 228), Color(62, 62, 62))
+
+    val sendButtonHoverColor: Color get() = JBColor(Color(210, 210, 210), Color(75, 75, 75))
+
+    val sendButtonPressedColor: Color get() = JBColor(Color(195, 195, 195), Color(85, 85, 85))
+
+    val sendButtonText: Color get() = JBColor(Color(80, 80, 80), Color(180, 180, 180))
 
     // =============== 强调色 ===============
 

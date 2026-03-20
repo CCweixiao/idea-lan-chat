@@ -1,20 +1,20 @@
 package com.lanchat.ui
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
 import com.lanchat.network.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.awt.*
 import java.awt.geom.Ellipse2D
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.swing.*
-import javax.swing.event.DocumentEvent
-import javax.swing.event.DocumentListener
 
 class AddContactDialog(private val project: Project) : DialogWrapper(project) {
 
@@ -77,36 +77,26 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                 add(JScrollPane(requestList).apply {
                     border = createListBorder(); preferredSize = Dimension(0, 140)
                 }, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 10, 4)).apply {
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
                     isOpaque = false
-                    add(JButton("通过").apply {
-                        font = Font("Microsoft YaHei", Font.BOLD, 13)
-                        background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
-                        isBorderPainted = false; isFocusPainted = false; isOpaque = true
-                        cursor = Cursor(Cursor.HAND_CURSOR)
-                        addActionListener {
-                            val s = requestList.selectedValue
-                            if (s == null) {
-                                JOptionPane.showMessageDialog(window, "请先选择一条好友申请", "提示", JOptionPane.WARNING_MESSAGE)
-                                return@addActionListener
-                            }
-                            service.acceptFriendRequest(s.id); loadRequests()
-                            JOptionPane.showMessageDialog(window, "已添加 ${s.fromUsername} 为好友", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    add(createSubtleButton("通过") {
+                        val s = requestList.selectedValue
+                        if (s == null) {
+                            JOptionPane.showMessageDialog(window, "请先选择一条好友申请", "提示", JOptionPane.WARNING_MESSAGE)
+                            return@createSubtleButton
                         }
+                        service.acceptFriendRequest(s.id); loadRequests()
+                        JOptionPane.showMessageDialog(window, "已添加 ${s.fromUsername} 为好友", "成功", JOptionPane.INFORMATION_MESSAGE)
                     })
-                    add(JButton("拒绝").apply {
-                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                        foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
-                        isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
-                        addActionListener {
-                            val s = requestList.selectedValue
-                            if (s == null) {
-                                JOptionPane.showMessageDialog(window, "请先选择一条好友申请", "提示", JOptionPane.WARNING_MESSAGE)
-                                return@addActionListener
-                            }
-                            service.rejectFriendRequest(s.id); loadRequests()
+                    add(createSubtleButton("拒绝") {
+                        val s = requestList.selectedValue
+                        if (s == null) {
+                            JOptionPane.showMessageDialog(window, "请先选择一条好友申请", "提示", JOptionPane.WARNING_MESSAGE)
+                            return@createSubtleButton
                         }
+                        service.rejectFriendRequest(s.id); loadRequests()
                     })
+                    add(createSubtleButton("刷新") { loadRequests() })
                 }, BorderLayout.SOUTH)
             }
 
@@ -119,35 +109,24 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                 add(JScrollPane(groupRequestList).apply {
                     border = createListBorder(); preferredSize = Dimension(0, 120)
                 }, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 10, 4)).apply {
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 4)).apply {
                     isOpaque = false
-                    add(JButton("同意").apply {
-                        font = Font("Microsoft YaHei", Font.BOLD, 13)
-                        background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
-                        isBorderPainted = false; isFocusPainted = false; isOpaque = true
-                        cursor = Cursor(Cursor.HAND_CURSOR)
-                        addActionListener {
-                            val s = groupRequestList.selectedValue
-                            if (s == null) {
-                                JOptionPane.showMessageDialog(window, "请先选择一条群聊邀请/申请", "提示", JOptionPane.WARNING_MESSAGE)
-                                return@addActionListener
-                            }
-                            service.acceptGroupInvite(s.id); loadRequests()
-                            JOptionPane.showMessageDialog(window, "已处理", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    add(createSubtleButton("同意") {
+                        val s = groupRequestList.selectedValue
+                        if (s == null) {
+                            JOptionPane.showMessageDialog(window, "请先选择一条群聊邀请/申请", "提示", JOptionPane.WARNING_MESSAGE)
+                            return@createSubtleButton
                         }
+                        service.acceptGroupInvite(s.id); loadRequests()
+                        JOptionPane.showMessageDialog(window, "已处理", "成功", JOptionPane.INFORMATION_MESSAGE)
                     })
-                    add(JButton("拒绝").apply {
-                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                        foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
-                        isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
-                        addActionListener {
-                            val s = groupRequestList.selectedValue
-                            if (s == null) {
-                                JOptionPane.showMessageDialog(window, "请先选择一条群聊邀请/申请", "提示", JOptionPane.WARNING_MESSAGE)
-                                return@addActionListener
-                            }
-                            service.rejectGroupInvite(s.id); loadRequests()
+                    add(createSubtleButton("拒绝") {
+                        val s = groupRequestList.selectedValue
+                        if (s == null) {
+                            JOptionPane.showMessageDialog(window, "请先选择一条群聊邀请/申请", "提示", JOptionPane.WARNING_MESSAGE)
+                            return@createSubtleButton
                         }
+                        service.rejectGroupInvite(s.id); loadRequests()
                     })
                 }, BorderLayout.SOUTH)
             }
@@ -171,9 +150,9 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         var probedPeer: Peer? = null
 
         val searchButton = JButton("搜索用户")
-        searchButton.font = Font("Microsoft YaHei", Font.BOLD, 13)
-        searchButton.margin = Insets(6, 16, 6, 16)
+        searchButton.preferredSize = Dimension(120, 32)
         searchButton.cursor = Cursor(Cursor.HAND_CURSOR)
+        searchButton.isFocusPainted = false
         searchButton.addActionListener {
             val ip = ipField.text.trim()
             val port = portField.text.trim().toIntOrNull() ?: 8889
@@ -204,9 +183,9 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         }
 
         val sendButton = JButton("发送好友申请")
-        sendButton.font = Font("Microsoft YaHei", Font.BOLD, 13)
-        sendButton.margin = Insets(6, 16, 6, 16)
+        sendButton.preferredSize = Dimension(140, 32)
         sendButton.cursor = Cursor(Cursor.HAND_CURSOR)
+        sendButton.isFocusPainted = false
         sendButton.addActionListener {
             val peer = probedPeer
             if (peer == null) {
@@ -240,7 +219,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                 add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
                     isOpaque = false
                     add(searchButton)
-                    add(JLabel("提示：对方需在线").apply {
+                    add(JLabel("提示：对方需在线，记得关闭VPN").apply {
                         foreground = JBColor.GRAY; font = Font("Microsoft YaHei", Font.PLAIN, 11)
                     })
                 })
@@ -313,33 +292,33 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
 
     // =============== UI Helpers ===============
 
-    private fun createFieldBorder() = BorderFactory.createCompoundBorder(
-        BorderFactory.createLineBorder(JBColor(Color(210, 210, 210), Color(70, 70, 70)), 1),
-        JBUI.Borders.empty(6, 10)
-    )
-
     private fun createListBorder() = BorderFactory.createLineBorder(
         JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1
     )
 
-    private fun createGreenButton(text: String, action: () -> Unit): JButton {
+    private fun createSubtleButton(text: String, action: () -> Unit): JButton {
         return object : JButton(text) {
             override fun paintComponent(g: Graphics) {
                 val g2d = g as Graphics2D
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2d.color = background; g2d.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
-                super.paintComponent(g2d)
+                g2d.color = background
+                g2d.fillRoundRect(0, 0, width, height, 8, 8)
+                g2d.font = font; g2d.color = foreground
+                val fm = g2d.fontMetrics
+                g2d.drawString(text, (width - fm.stringWidth(text)) / 2, (height + fm.ascent - fm.descent) / 2)
             }
         }.apply {
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
-            background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
-            isBorderPainted = false; isFocusPainted = false; isOpaque = false
-            cursor = Cursor(Cursor.HAND_CURSOR); preferredSize = Dimension(0, 32)
-            border = JBUI.Borders.empty(4, 16, 4, 16)
+            background = ThemeManager.sendButtonColor; foreground = ThemeManager.sendButtonText
+            isBorderPainted = false; isFocusPainted = false; isOpaque = false; isContentAreaFilled = false
+            cursor = Cursor(Cursor.HAND_CURSOR)
+            margin = Insets(5, 16, 5, 16)
             addActionListener { action() }
             addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mouseEntered(e: java.awt.event.MouseEvent) { background = ThemeManager.primaryButtonHoverColor; repaint() }
-                override fun mouseExited(e: java.awt.event.MouseEvent) { background = ThemeManager.primaryButtonColor; repaint() }
+                override fun mouseEntered(e: java.awt.event.MouseEvent) { background = ThemeManager.sendButtonHoverColor; repaint() }
+                override fun mouseExited(e: java.awt.event.MouseEvent) { background = ThemeManager.sendButtonColor; repaint() }
+                override fun mousePressed(e: java.awt.event.MouseEvent) { background = ThemeManager.sendButtonPressedColor; repaint() }
+                override fun mouseReleased(e: java.awt.event.MouseEvent) { background = ThemeManager.sendButtonHoverColor; repaint() }
             })
         }
     }
@@ -464,10 +443,12 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
             add(statusLabel, BorderLayout.EAST)
         }
         override fun getListCellRendererComponent(list: JList<out Any>, value: Any, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
+            val myId = LanChatService.getInstance().currentUser?.id ?: ""
             when (value) {
                 is FriendRequest -> {
-                    titleLabel.text = "[好友] ${value.fromUsername}"
-                    detailLabel.text = value.message
+                    val isSent = value.fromUserId == myId
+                    titleLabel.text = if (isSent) "[好友] → ${value.toIp}" else "[好友] ${value.fromUsername}"
+                    detailLabel.text = if (isSent) "我发起的好友申请" else value.message
                     timeLabel.text = sdf.format(Date(value.timestamp))
                     when (value.status) {
                         FriendRequestStatus.PENDING_SENT -> { statusLabel.text = "等待验证"; statusLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)) }
@@ -477,8 +458,13 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                     }
                 }
                 is GroupRequest -> {
+                    val isSent = value.requesterId == myId
+                    val typeText = when (value.type) {
+                        GroupRequestType.INVITE -> if (isSent) "我邀请他人入群" else "${value.requesterName} 邀请你入群"
+                        GroupRequestType.JOIN_REQUEST -> if (isSent) "我申请加入群聊" else "${value.requesterName} 申请加入"
+                    }
                     titleLabel.text = "[群聊] ${value.groupName}"
-                    detailLabel.text = "${if (value.type == GroupRequestType.INVITE) "邀请" else "申请"}: ${value.message}"
+                    detailLabel.text = typeText
                     timeLabel.text = sdf.format(Date(value.timestamp))
                     when (value.status) {
                         GroupRequestStatus.PENDING -> { statusLabel.text = "待处理"; statusLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)) }

@@ -451,9 +451,6 @@ class ContactListPanel(
         if (dialog.showAndGet()) {
             val memberIds = dialog.selectedPeers.map { it.id }
             service.createGroup(dialog.groupName, memberIds)
-            if (dialog.shouldCreateBot && dialog.botName != null) {
-                service.createBot(dialog.botName!!)
-            }
         }
     }
 

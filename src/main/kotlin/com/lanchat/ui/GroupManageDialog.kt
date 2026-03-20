@@ -7,6 +7,7 @@ import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
 import com.lanchat.network.Group
 import com.lanchat.network.Peer
+import kotlinx.coroutines.*
 import java.awt.*
 import java.awt.datatransfer.StringSelection
 import java.awt.event.ActionEvent
@@ -32,10 +33,17 @@ class GroupManageDialog(
 
     private var isOwner = false
     private var debugInfo = ""
+    private val globalMuteButton = JButton()
+    private val dialogScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     init {
         title = "群聊详情"
         init()
+    }
+
+    override fun dispose() {
+        dialogScope.cancel()
+        super.dispose()
     }
 
     private fun loadData() {
@@ -44,7 +52,7 @@ class GroupManageDialog(
             groupNameField.text = g.name
             val myId = service.currentUser?.id ?: "null"
             debugInfo = "myId=$myId, ownerId=${g.ownerId}, equals=${myId == g.ownerId}"
-            isOwner = service.isGroupOwner(groupId)
+            isOwner = g.ownerId == myId
             groupNameField.isEditable = isOwner
             loadMembers()
             loadAvailableContacts()
@@ -191,15 +199,31 @@ class GroupManageDialog(
                     border = BorderFactory.createLineBorder(JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1)
                 }, BorderLayout.CENTER)
 
-                add(createStyledButton("移除选中成员", Color(220, 50, 50)) { removeSelectedMember() }, BorderLayout.SOUTH)
+                val leftButtonPanel = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false; border = JBUI.Borders.emptyTop(4)
+                    add(createStyledButton("移除", danger = true) { removeSelectedMember() })
+                    add(createStyledButton("禁言") { showMuteDialog() })
+                    add(createStyledButton("解禁") { unmuteSelectedMember() })
+                }
+                add(leftButtonPanel, BorderLayout.SOUTH)
             }
             add(leftPanel, BorderLayout.WEST)
 
             val rightPanel = JPanel(BorderLayout(0, 6)).apply {
-                add(JLabel("邀请联系人").apply {
-                    font = Font("Microsoft YaHei", Font.BOLD, 13)
-                    border = JBUI.Borders.emptyBottom(4)
-                }, BorderLayout.NORTH)
+                val rightHeaderPanel = JPanel(BorderLayout(0, 4)).apply {
+                    isOpaque = false; border = JBUI.Borders.emptyBottom(4)
+                    add(JLabel("邀请联系人").apply {
+                        font = Font("Microsoft YaHei", Font.BOLD, 13)
+                    }, BorderLayout.NORTH)
+
+                    globalMuteButton.font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                    updateGlobalMuteButton()
+                    globalMuteButton.isBorderPainted = false; globalMuteButton.isFocusPainted = false
+                    globalMuteButton.cursor = Cursor(Cursor.HAND_CURSOR)
+                    globalMuteButton.addActionListener { toggleGlobalMute() }
+                    add(globalMuteButton, BorderLayout.SOUTH)
+                }
+                add(rightHeaderPanel, BorderLayout.NORTH)
 
                 availableContactsList.cellRenderer = MemberCellRenderer(null)
                 availableContactsList.fixedCellHeight = 50
@@ -208,7 +232,7 @@ class GroupManageDialog(
                     border = BorderFactory.createLineBorder(JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1)
                 }, BorderLayout.CENTER)
 
-                add(createStyledButton("发送入群邀请", Color(7, 193, 96)) { inviteSelectedMember() }, BorderLayout.SOUTH)
+                add(createStyledButton("发送入群邀请") { inviteSelectedMember() }, BorderLayout.SOUTH)
             }
             add(rightPanel, BorderLayout.CENTER)
         }
@@ -230,74 +254,200 @@ class GroupManageDialog(
                 border = BorderFactory.createLineBorder(JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1)
             }, BorderLayout.CENTER)
 
-            val buttonPanel = JPanel(FlowLayout(FlowLayout.CENTER, 0, 8)).apply {
+            val buttonPanel = JPanel(BorderLayout(0, 6)).apply {
                 isOpaque = false
-                border = JBUI.Borders.emptyTop(4)
+                border = JBUI.Borders.emptyTop(8)
 
-                add(JLabel("你不是群主，无法管理成员").apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 11); foreground = JBColor.GRAY
-                })
+                add(JPanel(FlowLayout(FlowLayout.CENTER, 0, 0)).apply {
+                    isOpaque = false
+                    add(JLabel("你不是群主，无法管理成员").apply {
+                        font = Font(Font.SANS_SERIF, Font.PLAIN, 11); foreground = JBColor.GRAY
+                    })
+                }, BorderLayout.NORTH)
 
-                add(createStyledButton("退出群聊", Color(220, 50, 50)) {
+                add(createStyledButton("退出群聊", danger = true) {
                     val confirm = JOptionPane.showConfirmDialog(
                         this@GroupManageDialog.window,
-                        "确定要退出群聊「${group?.name}」吗？\n退出后将无法再接收群消息，但聊天记录会保留。",
+                        "确定要退出群聊「${group?.name}」吗？\n退出后群聊和聊天记录将被删除。",
                         "确认退群",
                         JOptionPane.YES_NO_OPTION,
                         JOptionPane.WARNING_MESSAGE
                     )
                     if (confirm == JOptionPane.YES_OPTION) {
-                        if (service.leaveGroup(groupId)) {
-                            JOptionPane.showMessageDialog(
-                                this@GroupManageDialog.window,
-                                "已退出群聊",
-                                "成功",
-                                JOptionPane.INFORMATION_MESSAGE
-                            )
-                            close(OK_EXIT_CODE)
-                        } else {
-                            JOptionPane.showMessageDialog(
-                                this@GroupManageDialog.window,
-                                "退群失败，你是群主无法退群",
-                                "提示",
-                                JOptionPane.WARNING_MESSAGE
-                            )
+                        when (service.leaveGroup(groupId)) {
+                            LanChatService.LeaveGroupResult.SUCCESS -> {
+                                JOptionPane.showMessageDialog(
+                                    this@GroupManageDialog.window, "已退出群聊", "成功",
+                                    JOptionPane.INFORMATION_MESSAGE
+                                )
+                                close(OK_EXIT_CODE)
+                            }
+                            LanChatService.LeaveGroupResult.IS_OWNER -> {
+                                JOptionPane.showMessageDialog(
+                                    this@GroupManageDialog.window, "你是群主，无法退群，请先解散群聊", "提示",
+                                    JOptionPane.WARNING_MESSAGE
+                                )
+                            }
+                            LanChatService.LeaveGroupResult.NOT_MEMBER -> {
+                                JOptionPane.showMessageDialog(
+                                    this@GroupManageDialog.window, "你已不在该群中", "提示",
+                                    JOptionPane.WARNING_MESSAGE
+                                )
+                                close(OK_EXIT_CODE)
+                            }
+                            LanChatService.LeaveGroupResult.ERROR -> {
+                                JOptionPane.showMessageDialog(
+                                    this@GroupManageDialog.window, "退群失败", "提示",
+                                    JOptionPane.WARNING_MESSAGE
+                                )
+                            }
                         }
                     }
-                })
+                }, BorderLayout.CENTER)
             }
             add(buttonPanel, BorderLayout.SOUTH)
         }
     }
 
-    private fun createStyledButton(text: String, color: Color, action: () -> Unit): JButton {
+    private fun createStyledButton(text: String, danger: Boolean = false, action: () -> Unit): JButton {
+        val normalBg = if (danger) JBColor(Color(255, 235, 235), Color(80, 45, 45)) else ThemeManager.sendButtonColor
+        val hoverBg = if (danger) JBColor(Color(255, 215, 215), Color(95, 50, 50)) else ThemeManager.sendButtonHoverColor
+        val pressedBg = if (danger) JBColor(Color(255, 195, 195), Color(110, 55, 55)) else ThemeManager.sendButtonPressedColor
+        val textColor = if (danger) JBColor(Color(200, 50, 50), Color(230, 100, 100)) else ThemeManager.sendButtonText
+
         return object : JButton(text) {
             override fun paintComponent(g: Graphics) {
                 val g2d = g as Graphics2D
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2d.color = background; g2d.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
-                super.paintComponent(g2d)
+                g2d.color = background
+                g2d.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                g2d.color = foreground
+                val fm = g2d.fontMetrics
+                val tx = (width - fm.stringWidth(text)) / 2
+                val ty = (height + fm.ascent - fm.descent) / 2
+                g2d.drawString(text, tx, ty)
             }
         }.apply {
-            font = Font("Microsoft YaHei", Font.PLAIN, 12)
-            background = color; foreground = Color.WHITE
-            isBorderPainted = false; isFocusPainted = false; isOpaque = false
-            cursor = Cursor(Cursor.HAND_CURSOR); preferredSize = Dimension(0, 30)
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 13)
+            background = normalBg; foreground = textColor
+            isBorderPainted = false; isFocusPainted = false; isOpaque = false; isContentAreaFilled = false
+            cursor = Cursor(Cursor.HAND_CURSOR)
+            val textWidth = getFontMetrics(font).stringWidth(text)
+            preferredSize = Dimension(textWidth + 40, 32)
             addActionListener { action() }
             addMouseListener(object : MouseAdapter() {
-                override fun mouseEntered(e: MouseEvent) { background = color.darker(); repaint() }
-                override fun mouseExited(e: MouseEvent) { background = color; repaint() }
+                override fun mouseEntered(e: MouseEvent) { background = hoverBg; repaint() }
+                override fun mouseExited(e: MouseEvent) { background = normalBg; repaint() }
+                override fun mousePressed(e: MouseEvent) { background = pressedBg; repaint() }
+                override fun mouseReleased(e: MouseEvent) { background = hoverBg; repaint() }
             })
+        }
+    }
+
+    private fun showMuteDialog() {
+        val selectedPeer = memberList.selectedValue ?: run {
+            JOptionPane.showMessageDialog(window, "请先选择要禁言的成员", "提示", JOptionPane.WARNING_MESSAGE); return
+        }
+        if (selectedPeer.id == group?.ownerId) {
+            JOptionPane.showMessageDialog(window, "不能禁言群主", "提示", JOptionPane.WARNING_MESSAGE); return
+        }
+        val options = arrayOf("永久", "1分钟", "5分钟", "10分钟", "30分钟", "1小时", "6小时", "12小时", "1天", "3天", "7天")
+        val choice = JOptionPane.showInputDialog(
+            window, "选择禁言时长：", "禁言 ${selectedPeer.username}",
+            JOptionPane.QUESTION_MESSAGE, null, options, options[0]
+        ) as? String ?: return
+
+        val durationMs = when (choice) {
+            "永久" -> -1L
+            "1分钟" -> 60_000L
+            "5分钟" -> 5 * 60_000L
+            "10分钟" -> 10 * 60_000L
+            "30分钟" -> 30 * 60_000L
+            "1小时" -> 3_600_000L
+            "6小时" -> 6 * 3_600_000L
+            "12小时" -> 12 * 3_600_000L
+            "1天" -> 86_400_000L
+            "3天" -> 3 * 86_400_000L
+            "7天" -> 7 * 86_400_000L
+            else -> return
+        }
+        service.muteUser(groupId, selectedPeer.id, durationMs)
+        loadMembers()
+        JOptionPane.showMessageDialog(window, "${selectedPeer.username} 已被禁言", "成功", JOptionPane.INFORMATION_MESSAGE)
+    }
+
+    private fun unmuteSelectedMember() {
+        val selectedPeer = memberList.selectedValue ?: run {
+            JOptionPane.showMessageDialog(window, "请先选择要解禁的成员", "提示", JOptionPane.WARNING_MESSAGE); return
+        }
+        if (group?.mutedMembers?.containsKey(selectedPeer.id) != true) {
+            JOptionPane.showMessageDialog(window, "${selectedPeer.username} 未被禁言", "提示", JOptionPane.INFORMATION_MESSAGE); return
+        }
+        service.unmuteUser(groupId, selectedPeer.id)
+        loadMembers()
+        JOptionPane.showMessageDialog(window, "${selectedPeer.username} 已解除禁言", "成功", JOptionPane.INFORMATION_MESSAGE)
+    }
+
+    private fun toggleGlobalMute() {
+        val g = group ?: return
+        val newState = !g.globalMute
+        val confirm = JOptionPane.showConfirmDialog(
+            window, if (newState) "开启全员禁言后，除群主外所有成员将不能发言，确认？" else "确认关闭全员禁言？",
+            "全员禁言", JOptionPane.YES_NO_OPTION
+        )
+        if (confirm == JOptionPane.YES_OPTION) {
+            service.setGlobalMute(groupId, newState)
+            group = service.getGroup(groupId)
+            updateGlobalMuteButton()
+        }
+    }
+
+    private fun updateGlobalMuteButton() {
+        val g = group
+        if (g != null && g.globalMute) {
+            globalMuteButton.text = "🔇 全员禁言已开启（点击关闭）"
+            globalMuteButton.foreground = JBColor(Color(200, 50, 50), Color(230, 100, 100))
+        } else {
+            globalMuteButton.text = "🔊 全员禁言已关闭（点击开启）"
+            globalMuteButton.foreground = JBColor(Color(100, 100, 100), Color(160, 160, 160))
         }
     }
 
     private fun inviteSelectedMember() {
         val selectedPeer = availableContactsList.selectedValue ?: return
-        service.inviteToGroup(groupId, selectedPeer.id)
-        JOptionPane.showMessageDialog(
-            this.window, "已发送入群邀请给 ${selectedPeer.username}，等待对方确认", "邀请已发送",
-            JOptionPane.INFORMATION_MESSAGE
-        )
+        val statusLabel = JLabel("正在发送邀请给 ${selectedPeer.username}，等待对方确认...")
+        statusLabel.font = Font("Microsoft YaHei", Font.PLAIN, 12)
+        statusLabel.foreground = JBColor(Color(100, 100, 100), Color(160, 160, 160))
+
+        val progressDialog = JDialog(window as? Frame, "邀请中", false)
+        progressDialog.apply {
+            layout = BorderLayout()
+            add(JPanel(BorderLayout()).apply {
+                border = JBUI.Borders.empty(20)
+                add(statusLabel, BorderLayout.CENTER)
+            }, BorderLayout.CENTER)
+            setSize(350, 100)
+            setLocationRelativeTo(window)
+        }
+        progressDialog.isVisible = true
+
+        dialogScope.launch {
+            val success = service.inviteToGroup(groupId, selectedPeer.id)
+            SwingUtilities.invokeLater {
+                progressDialog.dispose()
+                if (success) {
+                    JOptionPane.showMessageDialog(
+                        window, "入群邀请已成功送达 ${selectedPeer.username}", "邀请成功",
+                        JOptionPane.INFORMATION_MESSAGE
+                    )
+                } else {
+                    JOptionPane.showMessageDialog(
+                        window, "邀请发送失败，${selectedPeer.username} 可能不在线或网络异常（10秒未收到反馈）", "邀请失败",
+                        JOptionPane.WARNING_MESSAGE
+                    )
+                }
+            }
+        }
     }
 
     private fun removeSelectedMember() {
@@ -383,6 +533,9 @@ class GroupManageDialog(
                 when {
                     grp != null && grp.ownerId == peer.id -> {
                         roleLabel.text = "群主"; roleLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)); roleLabel.isVisible = true
+                    }
+                    grp != null && grp.isMuted(peer.id) -> {
+                        roleLabel.text = "🔇 已禁言"; roleLabel.foreground = JBColor(Color(200, 50, 50), Color(230, 100, 100)); roleLabel.isVisible = true
                     }
                     grp != null && peer.id == svc.currentUser?.id -> {
                         roleLabel.text = "我"; roleLabel.foreground = JBColor(Color(7, 193, 96), Color(100, 200, 130)); roleLabel.isVisible = true

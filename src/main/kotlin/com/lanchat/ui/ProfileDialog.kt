@@ -20,15 +20,12 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
     
     private val service = LanChatService.getInstance()
     
-    // 昵称输入框
     private val nicknameField = JTextField(20)
-    
-    // 显示当前IP
     private val ipLabel = JLabel()
-    
-    // 头像
     private var avatarPath: String? = service.userAvatar
     private val avatarButton = JButton()
+    private val encryptionCheckbox = JCheckBox("启用消息加密传输")
+    private val encryptionKeyField = JPasswordField(20)
     
     init {
         title = "个人信息"
@@ -39,6 +36,9 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
     private fun loadData() {
         nicknameField.text = service.username
         ipLabel.text = service.localIp
+        encryptionCheckbox.isSelected = service.isEncryptionEnabled()
+        encryptionKeyField.text = service.getEncryptionKey()
+        encryptionKeyField.isEnabled = encryptionCheckbox.isSelected
         updateAvatarDisplay()
     }
     
@@ -66,7 +66,7 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
     override fun createCenterPanel(): JComponent {
         return JPanel(BorderLayout(0, 12)).apply {
             border = JBUI.Borders.empty(16)
-            preferredSize = Dimension(450, 280)
+            preferredSize = Dimension(450, 400)
             
             // 头像区域
             val avatarPanel = JPanel(BorderLayout()).apply {
@@ -116,10 +116,36 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
                 ipLabel.foreground = JBColor(Color(0, 122, 255), Color(100, 150, 255))
                 add(ipLabel, gbc)
                 
-                // 提示信息
+                // 分隔线
                 gbc.gridx = 0; gbc.gridy = 2
                 gbc.gridwidth = 2
-                add(JLabel("提示：昵称修改后将在下次发送消息时生效").apply {
+                add(JSeparator().apply {
+                    foreground = JBColor(Color(220, 220, 220), Color(60, 60, 60))
+                }, gbc)
+
+                // 加密开关
+                gbc.gridx = 0; gbc.gridy = 3
+                gbc.gridwidth = 2
+                encryptionCheckbox.apply {
+                    font = font.deriveFont(Font.BOLD)
+                    isOpaque = false
+                    addActionListener { encryptionKeyField.isEnabled = isSelected }
+                }
+                add(encryptionCheckbox, gbc)
+
+                // 加密密钥
+                gbc.gridx = 0; gbc.gridy = 4
+                gbc.gridwidth = 1; gbc.weightx = 0.0
+                add(JLabel("加密密钥:").apply {
+                    font = font.deriveFont(Font.BOLD)
+                }, gbc)
+                gbc.gridx = 1; gbc.weightx = 1.0
+                add(encryptionKeyField, gbc)
+
+                // 加密提示
+                gbc.gridx = 0; gbc.gridy = 5
+                gbc.gridwidth = 2
+                add(JLabel("提示：所有通信方需使用相同密钥，留空则使用内置默认密钥").apply {
                     foreground = JBColor.GRAY
                     font = font.deriveFont(11f)
                 }, gbc)
@@ -161,10 +187,13 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
             service.updateUsername(newNickname)
         }
         
-        // 保存头像
         avatarPath?.let {
             service.updateUserAvatar(it)
         }
+
+        service.setEncryptionEnabled(encryptionCheckbox.isSelected)
+        val key = String(encryptionKeyField.password).trim()
+        service.updateEncryptionKey(key)
         
         super.doOKAction()
     }

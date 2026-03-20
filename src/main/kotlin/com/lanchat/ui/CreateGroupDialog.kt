@@ -25,14 +25,6 @@ class CreateGroupDialog(
     val groupName: String get() = groupNameField.text.trim()
     val selectedPeers: List<Peer> get() = peerList.selectedValuesList.ifEmpty { emptyList() }
 
-    var shouldCreateBot = false
-        private set
-    var botName: String? = null
-        private set
-
-    private val botCheckBox = JCheckBox("同时创建群机器人")
-    private val botNameField = JTextField(15)
-
     init {
         title = "创建群聊"
         init()
@@ -43,11 +35,6 @@ class CreateGroupDialog(
         val currentUserId = service.currentUser?.id
         availablePeers.filter { it.id != currentUserId }.forEach { peerListModel.addElement(it) }
         peerList.cellRenderer = PeerListCellRenderer()
-        botCheckBox.addActionListener {
-            botNameField.isEnabled = botCheckBox.isSelected
-            if (botCheckBox.isSelected && botNameField.text.isEmpty()) botNameField.text = "小助手"
-        }
-        botNameField.isEnabled = false
     }
 
     override fun createCenterPanel(): JComponent {
@@ -80,37 +67,12 @@ class CreateGroupDialog(
                 }, BorderLayout.SOUTH)
             }
             add(memberPanel, BorderLayout.CENTER)
-
-            val botPanel = JPanel(BorderLayout(0, 6)).apply {
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(1, 0, 0, 0, JBColor(Color(220, 220, 220), Color(60, 60, 60))),
-                    JBUI.Borders.emptyTop(8)
-                )
-                botCheckBox.font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                add(botCheckBox, BorderLayout.NORTH)
-                val botNamePanel = JPanel(BorderLayout(6, 0)).apply {
-                    border = JBUI.Borders.emptyLeft(24)
-                    add(JLabel("机器人名称:").apply { font = Font("Microsoft YaHei", Font.PLAIN, 12) }, BorderLayout.WEST)
-                    botNameField.font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                    add(botNameField, BorderLayout.CENTER)
-                }
-                add(botNamePanel, BorderLayout.CENTER)
-            }
-            add(botPanel, BorderLayout.SOUTH)
         }
     }
 
     override fun doValidate(): ValidationInfo? {
         if (groupName.isEmpty()) return ValidationInfo("请输入群名称", groupNameField)
-        if (botCheckBox.isSelected && botNameField.text.trim().isEmpty())
-            return ValidationInfo("请输入机器人名称", botNameField)
         return null
-    }
-
-    override fun doOKAction() {
-        shouldCreateBot = botCheckBox.isSelected
-        botName = if (shouldCreateBot) botNameField.text.trim() else null
-        super.doOKAction()
     }
 
     private class PeerListCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Peer> {

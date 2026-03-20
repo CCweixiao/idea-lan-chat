@@ -1,18 +1,27 @@
 package com.lanchat.ui
 
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
+import com.lanchat.util.CryptoManager
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
-import com.lanchat.network.Bot
 import com.lanchat.network.Group
 import com.lanchat.network.Peer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import java.awt.*
 import java.awt.event.ActionEvent
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -28,13 +37,15 @@ import javax.swing.border.EmptyBorder
 class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val service = LanChatService.getInstance()
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val messagePanel: JPanel
     private val messageScrollPane: JBScrollPane
     private val inputArea = JTextArea(3, 20)
     private var currentPeer: Peer? = null
     private var currentGroup: Group? = null
-    private var currentBot: Bot? = null
+    private var scrollToBottomButton: JButton? = null
+    private lateinit var sendButton: JButton
 
     private val titleLabel = JLabel()
     private val statusLabel = JLabel()
@@ -66,7 +77,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val messageListener: (Message) -> Unit = { message ->
         if (message.senderId != service.currentUser?.id) {
-            val currentChatId = currentBot?.id ?: currentPeer?.id ?: currentGroup?.id
+            val currentChatId = currentPeer?.id ?: currentGroup?.id
             if (currentChatId != null) {
                 val msgChatId = when {
                     !message.groupId.isNullOrEmpty() -> message.groupId
@@ -100,6 +111,11 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         inputPanel = createInputPanel()
         setupUI()
         service.addMessageListener(messageListener)
+        observeGroupChanges()
+
+        addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent?) { scrollToBottom() }
+        })
     }
 
     private fun setupUI() {
@@ -112,10 +128,54 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             horizontalAlignment = SwingConstants.CENTER
         }, BorderLayout.CENTER)
 
+        scrollToBottomButton = object : JButton("↓ 最新消息") {
+            override fun paintComponent(g: Graphics) {
+                val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = background
+                g2d.fillRoundRect(0, 0, width - 1, height - 1, 16, 16)
+                g2d.color = foreground
+                val fm = g2d.fontMetrics
+                g2d.drawString(text, (width - fm.stringWidth(text)) / 2, (height + fm.ascent - fm.descent) / 2)
+            }
+        }.apply {
+            background = JBColor(Color(0, 0, 0, 140), Color(200, 200, 200, 160))
+            foreground = JBColor(Color.WHITE, Color(40, 40, 40))
+            font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
+            isBorderPainted = false; isFocusPainted = false; isContentAreaFilled = false; isOpaque = false
+            cursor = Cursor(Cursor.HAND_CURSOR)
+            preferredSize = Dimension(110, 28)
+            isVisible = false
+            addActionListener { scrollToBottom() }
+        }
+
+        messageScrollPane.verticalScrollBar.addAdjustmentListener { e ->
+            val sb = e.adjustable
+            val atBottom = sb.value + sb.visibleAmount >= sb.maximum - 50
+            scrollToBottomButton?.isVisible = !atBottom && sb.maximum > sb.visibleAmount * 2
+        }
+
+        val messageArea = JLayeredPane().apply {
+            layout = object : LayoutManager {
+                override fun addLayoutComponent(name: String?, comp: Component?) {}
+                override fun removeLayoutComponent(comp: Component?) {}
+                override fun preferredLayoutSize(parent: Container?) = messageScrollPane.preferredSize
+                override fun minimumLayoutSize(parent: Container?) = messageScrollPane.minimumSize
+                override fun layoutContainer(parent: Container) {
+                    messageScrollPane.setBounds(0, 0, parent.width, parent.height)
+                    val btn = scrollToBottomButton ?: return
+                    val bw = btn.preferredSize.width; val bh = btn.preferredSize.height
+                    btn.setBounds((parent.width - bw) / 2, parent.height - bh - 12, bw, bh)
+                }
+            }
+            add(messageScrollPane, JLayeredPane.DEFAULT_LAYER)
+            add(scrollToBottomButton, JLayeredPane.PALETTE_LAYER)
+        }
+
         chatCard.apply {
             isOpaque = false
             add(createHeader(), BorderLayout.NORTH)
-            add(messageScrollPane, BorderLayout.CENTER)
+            add(messageArea, BorderLayout.CENTER)
             add(inputPanel, BorderLayout.SOUTH)
         }
 
@@ -175,7 +235,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 addActionListener { showGroupManageDialog() }
             })
         }
-        headerButtonPanel.add(createHeaderButton(AllIcons.General.Settings, "设置") { showProfileDialog() })
+        headerButtonPanel.add(createHeaderButton(AllIcons.General.Settings, "个人信息设置") { showProfileDialog() })
         headerButtonPanel.revalidate(); headerButtonPanel.repaint()
     }
 
@@ -220,24 +280,32 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     preferredSize = Dimension(0, 60)
                 }, BorderLayout.CENTER)
 
-                val sendButton = object : JButton("发送") {
+                sendButton = object : JButton("发送") {
                     override fun paintComponent(g: Graphics) {
                         val g2d = g as Graphics2D
                         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                        g2d.color = background; g2d.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
-                        super.paintComponent(g2d)
+                        g2d.color = background
+                        g2d.fillRoundRect(0, 0, width, height, 8, 8)
+                        g2d.font = font
+                        g2d.color = foreground
+                        val fm = g2d.fontMetrics
+                        val tx = (width - fm.stringWidth(text)) / 2
+                        val ty = (height + fm.ascent - fm.descent) / 2
+                        g2d.drawString(text, tx, ty)
                     }
                 }.apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                    background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
+                    font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                    background = ThemeManager.sendButtonColor
+                    foreground = ThemeManager.sendButtonText
                     isBorderPainted = false; isFocusPainted = false; isOpaque = false
-                    preferredSize = Dimension(64, 34); cursor = Cursor(Cursor.HAND_CURSOR)
+                    isContentAreaFilled = false
+                    preferredSize = Dimension(52, 30); cursor = Cursor(Cursor.HAND_CURSOR)
                     addActionListener { sendMessage() }
                     addMouseListener(object : MouseAdapter() {
-                        override fun mouseEntered(e: MouseEvent) { background = ThemeManager.primaryButtonHoverColor; repaint() }
-                        override fun mouseExited(e: MouseEvent) { background = ThemeManager.primaryButtonColor; repaint() }
-                        override fun mousePressed(e: MouseEvent) { background = Color(5, 153, 70); repaint() }
-                        override fun mouseReleased(e: MouseEvent) { background = Color(6, 173, 86); repaint() }
+                        override fun mouseEntered(e: MouseEvent) { background = ThemeManager.sendButtonHoverColor; repaint() }
+                        override fun mouseExited(e: MouseEvent) { background = ThemeManager.sendButtonColor; repaint() }
+                        override fun mousePressed(e: MouseEvent) { background = ThemeManager.sendButtonPressedColor; repaint() }
+                        override fun mouseReleased(e: MouseEvent) { background = ThemeManager.sendButtonHoverColor; repaint() }
                     })
                 }
                 add(JPanel(BorderLayout()).apply { isOpaque = false; add(sendButton, BorderLayout.SOUTH) }, BorderLayout.EAST)
@@ -253,6 +321,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         addActionListener { action() }
     }
 
+    private var suppressAtDetection = false
+
     private fun setupShortcuts() {
         inputArea.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "send")
         inputArea.actionMap.put("send", object : AbstractAction() {
@@ -262,25 +332,41 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         inputArea.actionMap.put("newline", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent?) { inputArea.append("\n") }
         })
+
+        inputArea.document.addDocumentListener(object : javax.swing.event.DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent) {
+                if (suppressAtDetection || currentGroup == null) return
+                if (e.length == 1) {
+                    try {
+                        val inserted = e.document.getText(e.offset, 1)
+                        if (inserted == "@") {
+                            ApplicationManager.getApplication().invokeLater({
+                                try { inputArea.document.remove(e.offset, 1) } catch (_: Exception) {}
+                                showMentionDialog()
+                            }, ModalityState.defaultModalityState())
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent) {}
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent) {}
+        })
     }
 
     // =============== Public API ===============
 
     fun setCurrentPeer(peer: Peer?) {
-        currentPeer = peer; currentGroup = null; currentBot = peer?.let { service.getBot(it.id) }
+        currentPeer = peer; currentGroup = null
         SwingUtilities.invokeLater {
             if (peer != null) {
                 service.setCurrentChatId(peer.id)
-                if (currentBot != null) {
-                    titleLabel.text = "${currentBot!!.name} [BOT]"
-                    statusLabel.text = "机器人 · 自动回复"
-                    statusLabel.foreground = JBColor(Color(100, 100, 200), Color(150, 130, 230))
-                } else {
-                    titleLabel.text = peer.username
-                    statusLabel.text = if (peer.isOnline) "在线 · ${peer.ipAddress}" else "离线 · ${peer.ipAddress}"
-                    statusLabel.foreground = if (peer.isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
-                }
+                titleLabel.text = peer.username
+                val onlineText = if (peer.isOnline) "在线 · ${peer.ipAddress}" else "离线 · ${peer.ipAddress}"
+                statusLabel.text = "$onlineText${encryptionTag()}"
+                statusLabel.foreground = if (peer.isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
                 updateHeaderButtons(); updateToolbar()
+                inputArea.isEditable = true; sendButton.isEnabled = true
+                inputArea.background = ThemeManager.panelBackground; inputArea.toolTipText = null
                 cardLayout.show(cardPanel, "chat"); loadChatHistory(peer.id)
             } else {
                 service.setCurrentChatId(null)
@@ -290,13 +376,15 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     fun setCurrentGroup(group: Group?) {
-        currentGroup = group; currentPeer = null; currentBot = null
+        currentGroup = group; currentPeer = null
         SwingUtilities.invokeLater {
             if (group != null) {
                 service.setCurrentChatId(group.id)
                 titleLabel.text = group.name
-                statusLabel.text = "${group.getMemberCount()} 位成员"; statusLabel.foreground = JBColor.GRAY
+                val muteInfo = if (group.globalMute) "（全员禁言中）" else ""
+                statusLabel.text = "${group.getMemberCount()} 位成员$muteInfo${encryptionTag()}"; statusLabel.foreground = JBColor.GRAY
                 updateHeaderButtons(); updateToolbar()
+                updateMuteStatus(group)
                 cardLayout.show(cardPanel, "chat"); loadChatHistory(group.id)
             } else {
                 service.setCurrentChatId(null)
@@ -306,7 +394,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     fun clearChat() {
-        currentPeer = null; currentGroup = null; currentBot = null
+        currentPeer = null; currentGroup = null
         service.setCurrentChatId(null)
         SwingUtilities.invokeLater { cardLayout.show(cardPanel, "empty"); clearChatDisplay() }
     }
@@ -469,12 +557,11 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         val text = inputArea.text.trim()
         if (text.isEmpty()) { inputArea.requestFocus(); return }
 
-        currentBot?.let { bot ->
-            service.sendBotMessage(bot.id, text); inputArea.text = ""
-            addMessageToPanel(Message(type = MessageType.TEXT, senderId = service.currentUser?.id ?: "",
-                receiverId = bot.id, content = text, senderName = service.username)); return
-        }
         currentGroup?.let { group ->
+            if (service.isUserMuted(group.id)) {
+                JOptionPane.showMessageDialog(this, "你已被禁言，暂时无法在此群发言", "禁言提示", JOptionPane.WARNING_MESSAGE)
+                return
+            }
             val mIds = pendingMentionUserIds.toList(); val mAll = pendingMentionAll
             pendingMentionUserIds = emptyList(); pendingMentionAll = false
             service.sendGroupMessage(group.id, text, mIds, mAll); inputArea.text = ""
@@ -512,7 +599,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             pendingMentionUserIds = dialog.selectedMemberIds; pendingMentionAll = dialog.isMentionAll
             val mentionText = if (dialog.isMentionAll) "@全体成员 " else
                 dialog.selectedMemberIds.mapNotNull { id -> service.getGroupMembers(group.id).find { it.id == id }?.username }.joinToString(" ") { "@$it " }
-            if (mentionText.isNotEmpty()) { inputArea.append(mentionText); inputArea.requestFocus() }
+            if (mentionText.isNotEmpty()) {
+                suppressAtDetection = true
+                inputArea.append(mentionText)
+                suppressAtDetection = false
+                inputArea.requestFocus()
+            }
         }
     }
 
@@ -558,13 +650,10 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         val isSentByMe = message.senderId == service.currentUser?.id
         val senderName = message.senderName ?: if (isSentByMe) service.username else "未知用户"
         val avatarPath = if (isSentByMe) service.userAvatar else null
-        val bot = service.getBot(message.senderId)
-        val isBotMessage = bot != null
         val isGroupChat = currentGroup != null
 
         val avatarSize = 36
-        val avatarIcon = if (isBotMessage) createInitialAvatar("B", avatarSize, Color(100, 100, 200))
-        else createAvatarIcon(avatarPath, senderName, avatarSize)
+        val avatarIcon = createAvatarIcon(avatarPath, senderName, avatarSize)
 
         val avatarLabel = JLabel(avatarIcon).apply {
             verticalAlignment = SwingConstants.TOP
@@ -572,7 +661,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             border = JBUI.Borders.emptyTop(2)
         }
 
-        val bubble = createBubble(message, isSentByMe, senderName, isBotMessage, isGroupChat)
+        val bubble = createBubble(message, isSentByMe, senderName, isGroupChat)
 
         return object : JPanel(BorderLayout()) {
             override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
@@ -594,34 +683,39 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun createBubble(
         message: Message, isSentByMe: Boolean, senderName: String,
-        isBotMessage: Boolean, isGroupChat: Boolean
+        isGroupChat: Boolean
     ): JPanel {
         val bubbleColor = if (isSentByMe) ThemeManager.sentBubbleColor
         else ThemeManager.receivedBubbleColor
 
         val textColor = ThemeManager.messageTextColor
         val hasMention = message.mentionAll || message.mentionedUserIds.isNotEmpty()
-        
-        // 已读状态信息
-        val hasReadStatus = isSentByMe && isGroupChat && message.readByUserNames.isNotEmpty()
-        val readStatusText = if (hasReadStatus) {
-            val names = message.readByUserNames
-            when {
-                names.size <= 3 -> "${names.joinToString("、")}已读"
-                else -> "${names.take(3).joinToString("、")}等${names.size}人已读"
-            }
-        } else null
 
-        // Measure text to determine bubble width
+        // Strip @mention text from content since it's shown as a styled label
+        var displayContent = message.content
+        if (hasMention) {
+            if (message.mentionAll) {
+                displayContent = displayContent.replace("@全体成员 ", "").replace("@全体成员", "").trim()
+            } else {
+                message.mentionedUserIds.forEach { id ->
+                    val name = service.peers.value[id]?.username
+                        ?: if (id == service.currentUser?.id) service.username else null
+                    if (name != null) {
+                        displayContent = displayContent.replace("@$name ", "").replace("@$name", "")
+                    }
+                }
+                displayContent = displayContent.trim()
+            }
+        }
+
         val fm = fontMetricsCache
-        val lines = message.content.split("\n")
+        val lines = displayContent.split("\n")
         val maxLineWidth = lines.maxOfOrNull { fm.stringWidth(it) } ?: 0
         val naturalWidth = maxLineWidth + 8
         val contentWidth = minOf(naturalWidth, MAX_BUBBLE_WIDTH)
         val needsWrap = naturalWidth > MAX_BUBBLE_WIDTH
 
-        // Create selectable text component
-        val textArea = JTextArea(message.content).apply {
+        val textArea = JTextArea(displayContent).apply {
             isEditable = false
             isOpaque = false
             lineWrap = needsWrap
@@ -655,12 +749,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             background = bubbleColor
             border = JBUI.Borders.empty(8, 12, 6, 12)
 
-            // Sender name for group/bot messages
-            if (!isSentByMe && (isGroupChat || isBotMessage)) {
-                val nameColor = if (isBotMessage) ThemeManager.botNameColor
-                else ThemeManager.senderNameColor
-                val displayName = if (isBotMessage) "$senderName [BOT]" else senderName
-                add(JLabel(displayName).apply { font = NAME_FONT; foreground = nameColor }, BorderLayout.NORTH)
+            if (!isSentByMe && isGroupChat) {
+                add(JLabel(senderName).apply { font = NAME_FONT; foreground = ThemeManager.senderNameColor }, BorderLayout.NORTH)
             }
 
             // Content area
@@ -686,7 +776,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             }
             add(contentPanel, BorderLayout.CENTER)
 
-            // 底部信息栏（时间 + 已读状态）
+            // 底部信息栏（仅时间）
             val bottomPanel = JPanel(BorderLayout(0, 2)).apply {
                 isOpaque = false
                 
@@ -698,14 +788,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     horizontalAlignment = SwingConstants.LEFT
                 }, BorderLayout.WEST)
                 
-                // 已读状态（群聊中自己发的消息）
-                if (readStatusText != null) {
-                    add(JLabel(readStatusText).apply {
-                        font = TIME_FONT
-                        foreground = ThemeManager.readStatusColor
-                        horizontalAlignment = SwingConstants.RIGHT
-                    }, BorderLayout.EAST)
-                }
             }
             add(bottomPanel, BorderLayout.SOUTH)
         }
@@ -798,6 +880,59 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun showProfileDialog() { ProfileDialog(project).showAndGet() }
     private fun showGroupManageDialog() { currentGroup?.let { GroupManageDialog(project, it.id).show() } }
     private fun showStorageManager() { StorageManagerDialog(project).isVisible = true }
+
+    private fun observeGroupChanges() {
+        scope.launch {
+            service.groups.collectLatest { groups ->
+                val gid = currentGroup?.id ?: return@collectLatest
+                val updatedGroup = groups[gid]
+                SwingUtilities.invokeLater {
+                    if (updatedGroup != null) {
+                        currentGroup = updatedGroup
+                        val muteInfo = if (updatedGroup.globalMute) "（全员禁言中）" else ""
+                        statusLabel.text = "${updatedGroup.getMemberCount()} 位成员$muteInfo${encryptionTag()}"
+                        updateHeaderButtons()
+                        updateMuteStatus(updatedGroup)
+                    } else {
+                        currentGroup = null
+                        clearChatDisplay()
+                        cardLayout.show(cardPanel, "empty")
+                    }
+                }
+            }
+        }
+        scope.launch {
+            service.peers.collectLatest { peers ->
+                val pid = currentPeer?.id ?: return@collectLatest
+                val updatedPeer = peers[pid]
+                SwingUtilities.invokeLater {
+                    if (updatedPeer != null) {
+                        currentPeer = updatedPeer
+                        val peerOnline = if (updatedPeer.isOnline) "在线 · ${updatedPeer.ipAddress}" else "离线 · ${updatedPeer.ipAddress}"
+                        statusLabel.text = "$peerOnline${encryptionTag()}"
+                        statusLabel.foreground = if (updatedPeer.isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateMuteStatus(group: com.lanchat.network.Group) {
+        val userId = service.currentUser?.id ?: return
+        val isMuted = group.isMuted(userId)
+        inputArea.isEditable = !isMuted
+        sendButton.isEnabled = !isMuted
+        if (isMuted) {
+            inputArea.text = ""
+            inputArea.background = JBColor(Color(240, 240, 240), Color(50, 50, 50))
+            inputArea.toolTipText = "你已被禁言，暂时无法发言"
+        } else {
+            inputArea.background = ThemeManager.panelBackground
+            inputArea.toolTipText = null
+        }
+    }
+
+    private fun encryptionTag(): String = if (CryptoManager.isEnabled) " · 🔒加密" else ""
 
     private fun clearChatDisplay() {
         titleLabel.text = ""; statusLabel.text = ""
