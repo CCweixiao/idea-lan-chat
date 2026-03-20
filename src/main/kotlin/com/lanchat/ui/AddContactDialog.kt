@@ -77,7 +77,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         }
         return JPanel(BorderLayout()).apply {
             border = JBUI.Borders.empty(4)
-            preferredSize = Dimension(560, 540)
+            preferredSize = Dimension(580, 520)
             add(tabbedPane, BorderLayout.CENTER)
         }
     }
@@ -252,7 +252,6 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
     // =============== Tab 3: Send Request ===============
 
     private fun createSendRequestTab(): JPanel {
-        // 探测结果显示区域
         val probeStatusLabel = JLabel().apply {
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
             foreground = JBColor.GRAY
@@ -263,8 +262,8 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         
         var probedPeer: Peer? = null
 
-        return JPanel(BorderLayout(0, 12)).apply {
-            border = JBUI.Borders.empty(8)
+        return JPanel(BorderLayout(0, 8)).apply {
+            border = JBUI.Borders.empty(12)
             
             // 标题
             add(JPanel(BorderLayout()).apply {
@@ -278,86 +277,81 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                 }, BorderLayout.SOUTH)
             }, BorderLayout.NORTH)
 
-            val formPanel = JPanel(GridBagLayout()).apply {
-                val gbc = GridBagConstraints().apply {
-                    fill = GridBagConstraints.HORIZONTAL; insets = Insets(6, 6, 6, 6)
-                }
-                fun addRow(row: Int, label: String, field: JComponent) {
-                    gbc.gridx = 0; gbc.gridy = row; gbc.weightx = 0.0; gbc.gridwidth = 1
-                    add(JLabel(label).apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) }, gbc)
-                    gbc.gridx = 1; gbc.weightx = 1.0; gbc.gridwidth = 2
-                    add(field, gbc)
-                }
-                ipField.font = Font("Microsoft YaHei", Font.PLAIN, 13); ipField.border = createFieldBorder()
-                portField.font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                greetingField.font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                greetingField.text = "你好，我是${service.username}"
+            // 表单区域（带滚动）
+            val formPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                border = JBUI.Borders.emptyTop(4)
 
-                addRow(0, "对方IP:", ipField)
-                addRow(1, "端口:", portField)
-
-                // 探测按钮和结果
-                gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 3; gbc.insets = Insets(12, 6, 6, 6)
-                add(JPanel(BorderLayout(0, 8)).apply {
+                // 第一行：IP + 端口 + 搜索按钮
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
                     isOpaque = false
-                    
-                    // 探测按钮行
-                    add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                        isOpaque = false
-                        add(createGreenButton("🔍 搜索用户") {
-                            val ip = ipField.text.trim()
-                            val port = portField.text.trim().toIntOrNull() ?: 8889
-                            if (ip.isEmpty()) {
-                                JOptionPane.showMessageDialog(window, "请输入IP地址", "提示", JOptionPane.WARNING_MESSAGE)
-                                return@createGreenButton
-                            }
-                            
-                            probeStatusLabel.text = "正在探测 $ip:$port ..."
-                            probeStatusLabel.foreground = JBColor(Color(100, 100, 200), Color(130, 130, 230))
-                            probedPeerInfo.text = ""
-                            
-                            // 异步探测
-                            scope.launch {
-                                val peer = service.probePeer(ip, port)
-                                SwingUtilities.invokeLater {
-                                    if (peer != null) {
-                                        probedPeer = peer
-                                        probeStatusLabel.text = "✓ 找到用户："
-                                        probeStatusLabel.foreground = ThemeManager.primaryButtonColor
-                                        probedPeerInfo.text = "${peer.username} (${peer.ipAddress}:${peer.port})"
-                                        probedPeerInfo.foreground = ThemeManager.primaryButtonColor
-                                    } else {
-                                        probedPeer = null
-                                        probeStatusLabel.text = "✗ 未找到用户，请确认IP和端口是否正确"
-                                        probeStatusLabel.foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
-                                        probedPeerInfo.text = ""
-                                    }
+                    add(JLabel("IP:").apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) })
+                    add(JPanel().apply {
+                        layout = BoxLayout(this, BoxLayout.X_AXIS)
+                        add(ipField.also { 
+                            it.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                            it.border = createFieldBorder()
+                            it.preferredSize = Dimension(160, 28)
+                        })
+                        add(JLabel(":").apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) })
+                        add(portField.also {
+                            it.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                            it.preferredSize = Dimension(50, 28)
+                        })
+                    })
+                    add(createGreenButton("搜索用户") {
+                        val ip = ipField.text.trim()
+                        val port = portField.text.trim().toIntOrNull() ?: 8889
+                        if (ip.isEmpty()) {
+                            JOptionPane.showMessageDialog(window, "请输入IP地址", "提示", JOptionPane.WARNING_MESSAGE)
+                            return@createGreenButton
+                        }
+                        
+                        probeStatusLabel.text = "正在探测 $ip:$port ..."
+                        probeStatusLabel.foreground = JBColor(Color(100, 100, 200), Color(130, 130, 230))
+                        probedPeerInfo.text = ""
+                        
+                        scope.launch {
+                            val peer = service.probePeer(ip, port)
+                            SwingUtilities.invokeLater {
+                                if (peer != null) {
+                                    probedPeer = peer
+                                    probeStatusLabel.text = "✓ 找到用户："
+                                    probeStatusLabel.foreground = ThemeManager.primaryButtonColor
+                                    probedPeerInfo.text = "${peer.username} (${peer.ipAddress}:${peer.port})"
+                                    probedPeerInfo.foreground = ThemeManager.primaryButtonColor
+                                } else {
+                                    probedPeer = null
+                                    probeStatusLabel.text = "✗ 未找到用户，请确认IP和端口是否正确"
+                                    probeStatusLabel.foreground = ThemeManager.dangerTextColor
+                                    probedPeerInfo.text = ""
                                 }
                             }
-                        })
-                        add(JLabel("提示：对方需在线才能被搜索到").apply {
-                            font = Font("Microsoft YaHei", Font.PLAIN, 11)
-                            foreground = JBColor.GRAY
-                        })
-                    }, BorderLayout.NORTH)
-                    
-                    // 探测结果显示
-                    add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-                        isOpaque = false
-                        add(probeStatusLabel)
-                        add(probedPeerInfo)
-                    }, BorderLayout.CENTER)
-                }, gbc)
+                        }
+                    })
+                })
 
-                // 验证消息输入
-                gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1; gbc.insets = Insets(6, 6, 6, 6)
-                add(JLabel("验证消息:").apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) }, gbc)
-                gbc.gridx = 1; gbc.gridwidth = 2
-                add(greetingField, gbc)
+                // 探测结果
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                    isOpaque = false
+                    add(probeStatusLabel)
+                    add(probedPeerInfo)
+                })
+
+                // 验证消息
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false; border = JBUI.Borders.emptyTop(12)
+                    add(JLabel("验证消息:").apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) })
+                    add(greetingField.also {
+                        it.font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        it.text = "你好，我是${service.username}"
+                        it.preferredSize = Dimension(350, 28)
+                    })
+                })
 
                 // 发送申请按钮
-                gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 3; gbc.insets = Insets(16, 6, 6, 6)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    isOpaque = false; border = JBUI.Borders.emptyTop(12)
                     add(createGreenButton("发送好友申请") {
                         val peer = probedPeer
                         if (peer == null) {
@@ -368,19 +362,16 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                             JOptionPane.showMessageDialog(window, "该用户已在好友列表中", "提示", JOptionPane.INFORMATION_MESSAGE)
                             return@createGreenButton
                         }
-                        
-                        // 发送好友申请（使用探测到的真实信息）
                         service.sendFriendRequest(peer.ipAddress, peer.port, greetingField.text.trim())
                         JOptionPane.showMessageDialog(window, "好友申请已发送给 ${peer.username}", "成功", JOptionPane.INFORMATION_MESSAGE)
-                        
-                        // 重置状态
-                        probedPeer = null
-                        probeStatusLabel.text = ""
-                        probedPeerInfo.text = ""
+                        probedPeer = null; probeStatusLabel.text = ""; probedPeerInfo.text = ""
                     })
-                }, gbc)
+                })
             }
-            add(formPanel, BorderLayout.CENTER)
+            add(JScrollPane(formPanel).apply {
+                border = null
+                viewportBorder = null
+            }, BorderLayout.CENTER)
         }
     }
 
