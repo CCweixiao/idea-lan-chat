@@ -36,20 +36,23 @@ object UserIdGenerator {
     }
 
     /**
-     * 获取第一个非回环网卡的 MAC 地址
+     * 获取第一个可用的 MAC 地址
+     * 优先使用非回环、非点对点的网卡，但也接受虚拟网卡
+     * 这样可以支持 Docker 容器等虚拟化环境
      */
     private fun getFirstMacAddress(): String? {
         try {
-            val interfaces = NetworkInterface.getNetworkInterfaces().toList()
-            for (ni in interfaces) {
-                // 跳过回环接口和虚拟接口
-                if (ni.isLoopback || ni.isVirtual) continue
-                // 跳过没有 MAC 地址的接口
-                val mac = ni.hardwareAddress ?: continue
-                if (mac.isNotEmpty()) {
-                    return mac.joinToString(":") { "%02X".format(it) }
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+                .asSequence()
+                .filter { it.isUp && !it.isLoopback }  // 只要是 UP 且非回环即可
+                .sortedWith(compareBy<NetworkInterface> { it.isVirtual }.thenBy { it.isPointToPoint })
+                .firstNotNullOfOrNull { ni ->
+                    val mac = ni.hardwareAddress
+                    if (mac != null && mac.isNotEmpty()) {
+                        mac.joinToString(":") { "%02X".format(it) }
+                    } else null
                 }
-            }
+            return interfaces
         } catch (e: Exception) {
             // 忽略异常，返回 null
         }
