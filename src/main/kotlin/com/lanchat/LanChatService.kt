@@ -8,6 +8,7 @@ import com.lanchat.db.DatabaseManager
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
 import com.lanchat.network.*
+import com.lanchat.ui.settings.LanChatSettings
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -93,7 +94,8 @@ class LanChatService : Disposable {
             newId
         }
 
-        _currentUser = Peer(id = userId, username = _username, ipAddress = _localIp, port = 8889)
+        val settings = LanChatSettings()
+        _currentUser = Peer(id = userId, username = _username, ipAddress = _localIp, port = settings.getTcpPort())
 
         _peers.value = DatabaseManager.loadPeers().mapValues { (_, peer) ->
             // 启动时给所有好友重置 lastSeen，避免立刻被判定离线
@@ -108,14 +110,17 @@ class LanChatService : Disposable {
 
         migrateGroupNumbers()
 
-        networkManager = NetworkManager()
+        networkManager = NetworkManager(
+            udpPort = settings.getUdpPort(),
+            tcpPort = settings.getTcpPort()
+        )
 
         scope.launch {
             networkManager?.let { nm ->
                 nm.start(_username, userId)
 
                 val actualPort = nm.getActualTcpPort()
-                if (actualPort != 8889) {
+                if (actualPort != settings.getTcpPort()) {
                     _currentUser = _currentUser?.copy(port = actualPort)
                 }
 
@@ -213,7 +218,8 @@ class LanChatService : Disposable {
     }
 
     private fun handleReceivedMessage(message: Message) {
-        if (message.senderId == _currentUser?.id) return
+        // FRIEND_REQUEST 消息需要处理自己发给自己的情况（用于测试）
+        if (message.senderId == _currentUser?.id && message.type != MessageType.FRIEND_REQUEST) return
         when (message.type) {
             MessageType.GROUP_SYNC -> handleGroupSync(message)
             MessageType.FRIEND_REQUEST -> handleIncomingFriendRequest(message)

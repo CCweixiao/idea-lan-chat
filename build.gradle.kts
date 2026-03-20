@@ -52,6 +52,11 @@ kotlin {
 }
 
 tasks {
+    // Disable the problematic version check task
+    named("initializeIntelliJPlugin") {
+        enabled = false
+    }
+
     withType<JavaCompile> {
         sourceCompatibility = "17"
         targetCompatibility = "17"

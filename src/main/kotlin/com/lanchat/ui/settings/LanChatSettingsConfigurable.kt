@@ -17,6 +17,8 @@ class LanChatSettingsConfigurable : Configurable {
     private val service = LanChatService.getInstance()
     private var usernameField: JTextField? = null
     private var themeCombo: JComboBox<String>? = null
+    private var udpPortField: JTextField? = null
+    private var tcpPortField: JTextField? = null
     private var mainPanel: JPanel? = null
     
     override fun getDisplayName(): String = "LAN Chat"
@@ -47,6 +49,17 @@ class LanChatSettingsConfigurable : Configurable {
         themePanel.add(themeCombo)
         panel.add(themePanel)
 
+        // 端口设置
+        val portPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        portPanel.border = JBUI.Borders.emptyTop(12)
+        portPanel.add(JLabel("UDP 端口:"))
+        udpPortField = JTextField(settings.getUdpPort().toString(), 6)
+        portPanel.add(udpPortField)
+        portPanel.add(JLabel("TCP 端口:"))
+        tcpPortField = JTextField(settings.getTcpPort().toString(), 6)
+        portPanel.add(tcpPortField)
+        panel.add(portPanel)
+
         // 主题说明
         val themeNotePanel = JPanel()
         themeNotePanel.layout = BoxLayout(themeNotePanel, BoxLayout.Y_AXIS)
@@ -72,9 +85,13 @@ class LanChatSettingsConfigurable : Configurable {
         note1.foreground = JBColor.GRAY
         notePanel.add(note1)
         
-        val note2 = JLabel("• 修改后需要重启插件生效")
+        val note2 = JLabel("• 修改用户名和主题后需要重启插件生效")
         note2.foreground = JBColor.GRAY
         notePanel.add(note2)
+
+        val note3 = JLabel("• 同一机器上运行多个实例需要使用不同的端口")
+        note3.foreground = JBColor.GRAY
+        notePanel.add(note3)
         
         panel.add(notePanel)
         
@@ -91,7 +108,9 @@ class LanChatSettingsConfigurable : Configurable {
     
     override fun isModified(): Boolean {
         return usernameField?.text != service.username ||
-               themeCombo?.selectedItem != ThemeManager.Theme.valueOf(settings.getTheme()).displayName
+               themeCombo?.selectedItem != ThemeManager.Theme.valueOf(settings.getTheme()).displayName ||
+               udpPortField?.text?.toIntOrNull() != settings.getUdpPort() ||
+               tcpPortField?.text?.toIntOrNull() != settings.getTcpPort()
     }
     
     override fun apply() {
@@ -101,11 +120,25 @@ class LanChatSettingsConfigurable : Configurable {
             }
         }
         applyThemePreview()
+
+        // 保存端口设置
+        udpPortField?.text?.toIntOrNull()?.let {
+            if (it > 0 && it < 65536) {
+                settings.setUdpPort(it)
+            }
+        }
+        tcpPortField?.text?.toIntOrNull()?.let {
+            if (it > 0 && it < 65536) {
+                settings.setTcpPort(it)
+            }
+        }
     }
     
     override fun reset() {
         usernameField?.text = service.username
         val currentTheme = try { ThemeManager.Theme.valueOf(settings.getTheme()) } catch (_: Exception) { ThemeManager.Theme.LIGHT }
         themeCombo?.selectedItem = currentTheme.displayName
+        udpPortField?.text = settings.getUdpPort().toString()
+        tcpPortField?.text = settings.getTcpPort().toString()
     }
 }

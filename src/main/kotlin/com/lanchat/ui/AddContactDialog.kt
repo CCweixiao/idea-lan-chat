@@ -85,7 +85,11 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                         isBorderPainted = false; isFocusPainted = false; isOpaque = true
                         cursor = Cursor(Cursor.HAND_CURSOR)
                         addActionListener {
-                            val s = requestList.selectedValue ?: return@addActionListener
+                            val s = requestList.selectedValue
+                            if (s == null) {
+                                JOptionPane.showMessageDialog(window, "请先选择一条好友申请", "提示", JOptionPane.WARNING_MESSAGE)
+                                return@addActionListener
+                            }
                             service.acceptFriendRequest(s.id); loadRequests()
                             JOptionPane.showMessageDialog(window, "已添加 ${s.fromUsername} 为好友", "成功", JOptionPane.INFORMATION_MESSAGE)
                         }
@@ -95,7 +99,11 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                         foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
                         isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
                         addActionListener {
-                            val s = requestList.selectedValue ?: return@addActionListener
+                            val s = requestList.selectedValue
+                            if (s == null) {
+                                JOptionPane.showMessageDialog(window, "请先选择一条好友申请", "提示", JOptionPane.WARNING_MESSAGE)
+                                return@addActionListener
+                            }
                             service.rejectFriendRequest(s.id); loadRequests()
                         }
                     })
@@ -119,7 +127,11 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                         isBorderPainted = false; isFocusPainted = false; isOpaque = true
                         cursor = Cursor(Cursor.HAND_CURSOR)
                         addActionListener {
-                            val s = groupRequestList.selectedValue ?: return@addActionListener
+                            val s = groupRequestList.selectedValue
+                            if (s == null) {
+                                JOptionPane.showMessageDialog(window, "请先选择一条群聊邀请/申请", "提示", JOptionPane.WARNING_MESSAGE)
+                                return@addActionListener
+                            }
                             service.acceptGroupInvite(s.id); loadRequests()
                             JOptionPane.showMessageDialog(window, "已处理", "成功", JOptionPane.INFORMATION_MESSAGE)
                         }
@@ -129,7 +141,11 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                         foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
                         isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
                         addActionListener {
-                            val s = groupRequestList.selectedValue ?: return@addActionListener
+                            val s = groupRequestList.selectedValue
+                            if (s == null) {
+                                JOptionPane.showMessageDialog(window, "请先选择一条群聊邀请/申请", "提示", JOptionPane.WARNING_MESSAGE)
+                                return@addActionListener
+                            }
                             service.rejectGroupInvite(s.id); loadRequests()
                         }
                     })

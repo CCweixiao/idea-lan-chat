@@ -12,17 +12,18 @@ import java.net.*
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
-class NetworkManager {
+class NetworkManager(
+    private val udpPort: Int = 8888,
+    private val tcpPort: Int = 8889
+) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val gson = Gson()
 
     private var udpSocket: DatagramSocket? = null
-    private val udpPort = 8888
     private val broadcastAddress = InetAddress.getByName("255.255.255.255")
 
     private var serverSocket: ServerSocket? = null
-    private val tcpPort = 8889
 
     private val connections = ConcurrentHashMap<String, Socket>()
 
