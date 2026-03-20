@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
+import com.lanchat.ui.settings.LanChatSettings
 import java.awt.*
 import java.awt.event.ActionListener
 import javax.swing.*
@@ -23,6 +24,8 @@ class LanChatMainPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var lastDividerLocation = 200
     
     init {
+        // 加载保存的主题设置
+        LanChatSettings().loadState(LanChatSettings().state)
         setupUI()
     }
     

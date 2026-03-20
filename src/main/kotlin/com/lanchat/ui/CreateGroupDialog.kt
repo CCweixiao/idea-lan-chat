@@ -116,10 +116,7 @@ class CreateGroupDialog(
     private class PeerListCellRenderer : JPanel(BorderLayout()), ListCellRenderer<Peer> {
         private val nameLabel = JLabel()
         private val ipLabel = JLabel()
-        private val peerColors = listOf(
-            Color(76, 175, 80), Color(33, 150, 243), Color(156, 39, 176),
-            Color(255, 152, 0), Color(233, 30, 99), Color(0, 150, 136)
-        )
+        private val peerColors = ThemeManager.avatarColors
         private var avatarInitial = "?"
         private var avatarColor = peerColors[0]
         private val avatarPanel = object : JPanel() {

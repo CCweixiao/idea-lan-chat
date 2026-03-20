@@ -214,7 +214,7 @@ class DiscoverPeersDialog(private val project: Project) : DialogWrapper(project)
             // 在线状态
             if (peer.isOnline) {
                 statusIcon.text = "●"
-                statusIcon.foreground = Color(76, 175, 80)
+                statusIcon.foreground = ThemeManager.onlineColor
             } else {
                 statusIcon.text = "○"
                 statusIcon.foreground = JBColor.GRAY

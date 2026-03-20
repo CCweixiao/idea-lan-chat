@@ -323,9 +323,9 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                                     if (peer != null) {
                                         probedPeer = peer
                                         probeStatusLabel.text = "✓ 找到用户："
-                                        probeStatusLabel.foreground = Color(7, 193, 96)
+                                        probeStatusLabel.foreground = ThemeManager.primaryButtonColor
                                         probedPeerInfo.text = "${peer.username} (${peer.ipAddress}:${peer.port})"
-                                        probedPeerInfo.foreground = Color(7, 193, 96)
+                                        probedPeerInfo.foreground = ThemeManager.primaryButtonColor
                                     } else {
                                         probedPeer = null
                                         probeStatusLabel.text = "✗ 未找到用户，请确认IP和端口是否正确"
@@ -517,14 +517,14 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
             }
         }.apply {
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
-            background = Color(7, 193, 96); foreground = Color.WHITE
+            background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
             isBorderPainted = false; isFocusPainted = false; isOpaque = false
             cursor = Cursor(Cursor.HAND_CURSOR); preferredSize = Dimension(0, 32)
             border = JBUI.Borders.empty(4, 16, 4, 16)
             addActionListener { action() }
             addMouseListener(object : java.awt.event.MouseAdapter() {
-                override fun mouseEntered(e: java.awt.event.MouseEvent) { background = Color(6, 173, 86); repaint() }
-                override fun mouseExited(e: java.awt.event.MouseEvent) { background = Color(7, 193, 96); repaint() }
+                override fun mouseEntered(e: java.awt.event.MouseEvent) { background = ThemeManager.primaryButtonHoverColor; repaint() }
+                override fun mouseExited(e: java.awt.event.MouseEvent) { background = ThemeManager.primaryButtonColor; repaint() }
             })
         }
     }
@@ -551,7 +551,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         private val nameLabel = JLabel()
         private val ipLabel = JLabel()
         private val statusLabel = JLabel()
-        private val peerColors = listOf(Color(76, 175, 80), Color(33, 150, 243), Color(156, 39, 176), Color(255, 152, 0), Color(233, 30, 99), Color(0, 150, 136))
+        private val peerColors = ThemeManager.avatarColors
         private var avatarInitial = "?"; private var avatarColor = peerColors[0]
         private val avatarPanel = object : JPanel() {
             override fun paintComponent(g: Graphics) {
@@ -583,7 +583,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
             avatarInitial = peer.username.firstOrNull()?.toString() ?: "?"; avatarColor = peerColors[Math.abs(avatarInitial.hashCode()) % peerColors.size]
             avatarPanel.repaint()
             statusLabel.text = if (peer.isOnline) "在线" else "离线"
-            statusLabel.foreground = if (peer.isOnline) Color(76, 175, 80) else JBColor.GRAY
+            statusLabel.foreground = if (peer.isOnline) ThemeManager.onlineColor else JBColor.GRAY
             background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
             return this
         }
@@ -658,7 +658,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         override fun getListCellRendererComponent(list: JList<out Group>, group: Group, index: Int, isSelected: Boolean, cellHasFocus: Boolean): JPanel {
             nameLabel.text = group.name; numberLabel.text = "群号: ${group.groupNumber}"; memberLabel.text = "${group.getMemberCount()}人"
             val isMember = LanChatService.getInstance().currentUser?.id?.let { group.memberIds.contains(it) } ?: false
-            if (isMember) { memberLabel.text = "已加入"; memberLabel.foreground = Color(7, 193, 96) } else { memberLabel.foreground = JBColor.GRAY }
+            if (isMember) { memberLabel.text = "已加入"; memberLabel.foreground = ThemeManager.primaryButtonColor } else { memberLabel.foreground = JBColor.GRAY }
             background = if (isSelected) JBColor(Color(215, 230, 250), Color(55, 65, 85)) else JBColor(Color(250, 250, 250), Color(45, 45, 45))
             return this
         }
@@ -693,7 +693,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                     when (value.status) {
                         FriendRequestStatus.PENDING_SENT -> { statusLabel.text = "等待验证"; statusLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)) }
                         FriendRequestStatus.PENDING_RECEIVED -> { statusLabel.text = "待处理"; statusLabel.foreground = JBColor(Color(33, 150, 243), Color(100, 180, 255)) }
-                        FriendRequestStatus.ACCEPTED -> { statusLabel.text = "已通过"; statusLabel.foreground = Color(7, 193, 96) }
+                        FriendRequestStatus.ACCEPTED -> { statusLabel.text = "已通过"; statusLabel.foreground = ThemeManager.primaryButtonColor }
                         FriendRequestStatus.REJECTED -> { statusLabel.text = "已拒绝"; statusLabel.foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80)) }
                     }
                 }
@@ -703,7 +703,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                     timeLabel.text = sdf.format(Date(value.timestamp))
                     when (value.status) {
                         GroupRequestStatus.PENDING -> { statusLabel.text = "待处理"; statusLabel.foreground = JBColor(Color(255, 152, 0), Color(255, 180, 50)) }
-                        GroupRequestStatus.ACCEPTED -> { statusLabel.text = "已同意"; statusLabel.foreground = Color(7, 193, 96) }
+                        GroupRequestStatus.ACCEPTED -> { statusLabel.text = "已同意"; statusLabel.foreground = ThemeManager.primaryButtonColor }
                         GroupRequestStatus.REJECTED -> { statusLabel.text = "已拒绝"; statusLabel.foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80)) }
                     }
                 }

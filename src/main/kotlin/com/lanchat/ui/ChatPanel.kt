@@ -82,20 +82,20 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     init {
         messagePanel = JPanel()
         messagePanel.layout = BoxLayout(messagePanel, BoxLayout.Y_AXIS)
-        messagePanel.background = JBColor(Color(240, 240, 240), Color(30, 30, 30))
+        messagePanel.background = ThemeManager.panelBackground
 
         messageScrollPane = JBScrollPane(messagePanel).apply {
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             border = JBUI.Borders.empty()
-            background = JBColor(Color(240, 240, 240), Color(30, 30, 30))
+            background = ThemeManager.panelBackground
         }
 
         inputArea.lineWrap = true
         inputArea.wrapStyleWord = true
         inputArea.border = EmptyBorder(8, 10, 8, 10)
         inputArea.font = MSG_FONT
-        inputArea.background = JBColor(Color(255, 255, 255), Color(50, 50, 50))
+        inputArea.background = ThemeManager.inputBackground
 
         inputPanel = createInputPanel()
         setupUI()
@@ -103,9 +103,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun setupUI() {
-        background = JBColor(Color(240, 240, 240), Color(30, 30, 30))
+        background = ThemeManager.panelBackground
 
-        emptyCard.background = JBColor(Color(240, 240, 240), Color(30, 30, 30))
+        emptyCard.background = ThemeManager.panelBackground
         emptyCard.add(JLabel("选择联系人或群聊开始聊天").apply {
             font = Font("Microsoft YaHei", Font.PLAIN, 15)
             foreground = JBColor(Color(170, 170, 170), Color(100, 100, 100))
@@ -229,13 +229,13 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     }
                 }.apply {
                     font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                    background = Color(7, 193, 96); foreground = Color.WHITE
+                    background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
                     isBorderPainted = false; isFocusPainted = false; isOpaque = false
                     preferredSize = Dimension(64, 34); cursor = Cursor(Cursor.HAND_CURSOR)
                     addActionListener { sendMessage() }
                     addMouseListener(object : MouseAdapter() {
-                        override fun mouseEntered(e: MouseEvent) { background = Color(6, 173, 86); repaint() }
-                        override fun mouseExited(e: MouseEvent) { background = Color(7, 193, 96); repaint() }
+                        override fun mouseEntered(e: MouseEvent) { background = ThemeManager.primaryButtonHoverColor; repaint() }
+                        override fun mouseExited(e: MouseEvent) { background = ThemeManager.primaryButtonColor; repaint() }
                         override fun mousePressed(e: MouseEvent) { background = Color(5, 153, 70); repaint() }
                         override fun mouseReleased(e: MouseEvent) { background = Color(6, 173, 86); repaint() }
                     })
@@ -278,7 +278,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 } else {
                     titleLabel.text = peer.username
                     statusLabel.text = if (peer.isOnline) "在线 · ${peer.ipAddress}" else "离线 · ${peer.ipAddress}"
-                    statusLabel.foreground = if (peer.isOnline) JBColor(Color(76, 175, 80), Color(100, 200, 130)) else JBColor.GRAY
+                    statusLabel.foreground = if (peer.isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
                 }
                 updateHeaderButtons(); updateToolbar()
                 cardLayout.show(cardPanel, "chat"); loadChatHistory(peer.id)
@@ -386,7 +386,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     border = JBUI.Borders.empty(4, 12)
                     add(JLabel("${msg.senderName ?: "未知"}: ${msg.content}").apply {
                         font = Font("Microsoft YaHei", Font.PLAIN, 13)
-                        foreground = if (isSentByMe) JBColor(Color(7, 193, 96), Color(100, 200, 130)) else JBColor.BLACK
+                        foreground = if (isSentByMe) ThemeManager.primaryButtonColor else ThemeManager.primaryTextColor
                     }, BorderLayout.CENTER)
                     add(JLabel(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp))).apply {
                         font = Font("Microsoft YaHei", Font.PLAIN, 10)
@@ -438,7 +438,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             }.apply {
                 isOpaque = false; border = JBUI.Borders.empty(6, 0)
                 add(JLabel(formatTimeSeparator(timestamp)).apply {
-                    font = NAME_FONT; foreground = JBColor(Color(180, 180, 180), Color(110, 110, 110))
+                    font = NAME_FONT; foreground = ThemeManager.timestampColor
                 })
             }
             messagePanel.add(sep)
@@ -594,10 +594,10 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         message: Message, isSentByMe: Boolean, senderName: String,
         isBotMessage: Boolean, isGroupChat: Boolean
     ): JPanel {
-        val bubbleColor = if (isSentByMe) JBColor(Color(149, 236, 105), Color(76, 141, 54))
-        else JBColor(Color(255, 255, 255), Color(58, 58, 58))
+        val bubbleColor = if (isSentByMe) ThemeManager.sentBubbleColor
+        else ThemeManager.receivedBubbleColor
 
-        val textColor = JBColor(Color(30, 30, 30), Color(220, 220, 220))
+        val textColor = ThemeManager.messageTextColor
         val hasMention = message.mentionAll || message.mentionedUserIds.isNotEmpty()
         
         // 已读状态信息
@@ -655,8 +655,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
             // Sender name for group/bot messages
             if (!isSentByMe && (isGroupChat || isBotMessage)) {
-                val nameColor = if (isBotMessage) JBColor(Color(100, 100, 200), Color(150, 130, 230))
-                else JBColor(Color(120, 120, 120), Color(160, 160, 160))
+                val nameColor = if (isBotMessage) ThemeManager.botNameColor
+                else ThemeManager.senderNameColor
                 val displayName = if (isBotMessage) "$senderName [BOT]" else senderName
                 add(JLabel(displayName).apply { font = NAME_FONT; foreground = nameColor }, BorderLayout.NORTH)
             }
@@ -674,7 +674,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                         "[@${names.joinToString(", ")}]"
                     }
                     add(JLabel(mentionText).apply {
-                        font = MENTION_FONT; foreground = JBColor(Color(33, 150, 243), Color(100, 180, 255))
+                        font = MENTION_FONT; foreground = ThemeManager.mentionColor
                         alignmentX = LEFT_ALIGNMENT; border = JBUI.Borders.emptyBottom(2)
                     })
                 }
@@ -691,8 +691,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 // 时间
                 add(JLabel(message.getFormattedTime()).apply {
                     font = TIME_FONT
-                    foreground = if (isSentByMe) JBColor(Color(80, 120, 60), Color(100, 150, 80))
-                    else JBColor(Color(170, 170, 170), Color(120, 120, 120))
+                    foreground = if (isSentByMe) ThemeManager.sentTimestampColor
+                    else ThemeManager.timestampColor
                     horizontalAlignment = SwingConstants.LEFT
                 }, BorderLayout.WEST)
                 
@@ -700,7 +700,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 if (readStatusText != null) {
                     add(JLabel(readStatusText).apply {
                         font = TIME_FONT
-                        foreground = JBColor(Color(100, 149, 237), Color(120, 160, 220))
+                        foreground = ThemeManager.readStatusColor
                         horizontalAlignment = SwingConstants.RIGHT
                     }, BorderLayout.EAST)
                 }
@@ -729,7 +729,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     g2d.color = background; g2d.fillRoundRect(0, 0, width, height, 8, 8)
                 }
             }.apply {
-                isOpaque = false; background = JBColor(Color(149, 236, 105), Color(76, 141, 54)); border = JBUI.Borders.empty(4)
+                isOpaque = false; background = ThemeManager.sentBubbleColor; border = JBUI.Borders.empty(4)
                 try {
                     val icon = ImageIcon(file.path)
                     val scale = minOf(200.0 / icon.iconWidth, 200.0 / icon.iconHeight, 1.0)

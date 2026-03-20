@@ -33,7 +33,7 @@ class ContactListPanel(
 
     private val contentPanel = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        background = BG_COLOR
+        background = ThemeManager.listBackground
     }
     private val scrollPane: JBScrollPane
     private val statusLabel = JLabel()
@@ -46,11 +46,6 @@ class ContactListPanel(
     private var selectedItem: ChatItem? = null
 
     companion object {
-        private val BG_COLOR = JBColor(Color(237, 237, 237), Color(38, 38, 38))
-        private val ITEM_BG = JBColor(Color(237, 237, 237), Color(38, 38, 38))
-        private val ITEM_HOVER = JBColor(Color(218, 218, 218), Color(50, 50, 50))
-        private val ITEM_SELECTED = JBColor(Color(196, 196, 196), Color(55, 55, 60))
-        private val HEADER_BG = JBColor(Color(237, 237, 237), Color(38, 38, 38))
         private val ACCENT_GREEN = Color(7, 193, 96)
         private val TITLE_FONT = Font("Microsoft YaHei", Font.BOLD, 16)
         private val SECTION_FONT = Font("Microsoft YaHei", Font.BOLD, 12)
@@ -62,14 +57,14 @@ class ContactListPanel(
         scrollPane = JBScrollPane(contentPanel).apply {
             border = JBUI.Borders.empty()
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            background = BG_COLOR
+            background = ThemeManager.listBackground
         }
         setupUI()
         observeData()
     }
 
     private fun setupUI() {
-        background = BG_COLOR
+        background = ThemeManager.listBackground
         add(createHeader(), BorderLayout.NORTH)
         add(JPanel(BorderLayout()).apply {
             isOpaque = false
@@ -81,7 +76,7 @@ class ContactListPanel(
 
     private fun createHeader(): JPanel {
         return JPanel(BorderLayout()).apply {
-            background = BG_COLOR
+            background = ThemeManager.listBackground
             border = JBUI.Borders.empty(12, 16, 4, 16)
 
             val titlePanel = JPanel(BorderLayout()).apply {
@@ -91,7 +86,7 @@ class ContactListPanel(
                     isOpaque = false
                     add(JLabel("IP: ").apply { font = SUB_FONT; foreground = JBColor.GRAY })
                     add(JLabel(service.localIp).apply {
-                        font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, Color(100, 200, 130))
+                        font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
                     })
                 }, BorderLayout.SOUTH)
             }
@@ -120,7 +115,7 @@ class ContactListPanel(
                 }
             }.apply {
                 isOpaque = false
-                background = JBColor(Color(225, 225, 225), Color(50, 50, 50))
+                background = JBColor(Color(225, 225, 225), ThemeManager.itemHover)
                 searchField.apply {
                     border = JBUI.Borders.empty(7, 12, 7, 12)
                     font = Font("Microsoft YaHei", Font.PLAIN, 13)
@@ -140,7 +135,7 @@ class ContactListPanel(
 
     private fun createFooter(): JPanel {
         return JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            background = BG_COLOR
+            background = ThemeManager.listBackground
             border = JBUI.Borders.empty(6, 16, 6, 16)
             statusLabel.font = SUB_FONT
             statusLabel.foreground = JBColor.GRAY
@@ -154,7 +149,7 @@ class ContactListPanel(
                 val g2d = g as Graphics2D
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                 if (model.isRollover) {
-                    g2d.color = JBColor(Color(210, 210, 210), Color(60, 60, 60))
+                    g2d.color = JBColor(Color(210, 210, 210), ThemeManager.borderColor)
                     g2d.fillRoundRect(2, 2, width - 4, height - 4, 8, 8)
                 }
                 super.paintComponent(g2d)
@@ -183,19 +178,19 @@ class ContactListPanel(
             }
         }.apply {
             isOpaque = false
-            background = HEADER_BG
+            background = ThemeManager.listBackground
             border = JBUI.Borders.empty(8, 16, 4, 16)
             cursor = Cursor(Cursor.HAND_CURSOR)
 
             val arrow = if (expanded) "\u25BC" else "\u25B6"
             add(JLabel("$arrow  $title").apply {
                 font = SECTION_FONT
-                foreground = JBColor(Color(140, 140, 140), Color(130, 130, 130))
+                foreground = ThemeManager.secondaryTextColor
             }, BorderLayout.WEST)
 
             add(JLabel("$count").apply {
                 font = SUB_FONT
-                foreground = JBColor(Color(170, 170, 170), Color(110, 110, 110))
+                foreground = ThemeManager.tertiaryTextColor
             }, BorderLayout.EAST)
 
             addMouseListener(object : MouseAdapter() {
@@ -220,9 +215,9 @@ class ContactListPanel(
             override fun paintComponent(g: Graphics) {
                 val g2d = g as Graphics2D
                 g2d.color = when {
-                    isSelected -> ITEM_SELECTED
-                    hovering -> ITEM_HOVER
-                    else -> ITEM_BG
+                    isSelected -> ThemeManager.itemSelected
+                    hovering -> ThemeManager.itemHover
+                    else -> ThemeManager.listBackground
                 }
                 g2d.fillRect(0, 0, width, height)
             }
@@ -293,7 +288,7 @@ class ContactListPanel(
                     val y = 2
 
                     // 绘制红色圆形徽章
-                    g2d.color = Color(250, 81, 81)
+                    g2d.color = ThemeManager.badgeColor
                     g2d.fillRoundRect(x, y, badgeWidth, badgeHeight, 9, 9)
 
                     // 绘制文字
@@ -320,7 +315,7 @@ class ContactListPanel(
                         super.paintComponent(g)
                         val g2d = g as Graphics2D
                         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                        g2d.color = if (isOnline) Color(76, 175, 80) else Color(190, 190, 190)
+                        g2d.color = if (isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
                         g2d.fillOval(0, 0, 8, 8)
                     }
                 }.apply { isOpaque = false; preferredSize = Dimension(8, 8) })
@@ -345,11 +340,8 @@ class ContactListPanel(
     }
 
     private fun createAvatarPanel(initial: String, isGroup: Boolean): JPanel {
-        val peerColors = listOf(
-            Color(76, 175, 80), Color(33, 150, 243), Color(156, 39, 176),
-            Color(255, 152, 0), Color(233, 30, 99), Color(0, 150, 136)
-        )
-        val groupColor = JBColor(Color(87, 137, 213), Color(70, 120, 190))
+        val peerColors = ThemeManager.avatarColors
+        val groupColor = ThemeManager.groupIconColor
 
         return object : JPanel() {
             override fun paintComponent(g: Graphics) {
@@ -483,7 +475,7 @@ class ContactListPanel(
                 })
                 if (service.isGroupOwner(item.group.id)) {
                     menu.addSeparator()
-                    menu.add(createMenuItem("解散群聊", Color(220, 50, 50)) {
+                    menu.add(createMenuItem("解散群聊", ThemeManager.dangerTextColor) {
                         val confirm = JOptionPane.showConfirmDialog(
                             this, "确定要解散群聊「${item.group.name}」吗？", "确认", JOptionPane.YES_NO_OPTION
                         )
@@ -495,7 +487,7 @@ class ContactListPanel(
                 }
             }
             is ChatItem.PeerItem -> {
-                menu.add(createMenuItem("删除联系人", Color(220, 50, 50)) {
+                menu.add(createMenuItem("删除联系人", ThemeManager.dangerTextColor) {
                     val confirm = JOptionPane.showConfirmDialog(
                         this, "确定要删除联系人「${item.peer.username}」吗？", "确认", JOptionPane.YES_NO_OPTION
                     )
@@ -523,7 +515,7 @@ class ContactListPanel(
             if (text.isNullOrEmpty()) {
                 val g2d = g as Graphics2D
                 g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-                g2d.color = JBColor(Color(170, 170, 170), Color(120, 120, 120))
+                g2d.color = ThemeManager.tertiaryTextColor
                 g2d.font = font
                 val fm = g2d.fontMetrics
                 g2d.drawString(placeholder, insets.left + 2, height / 2 + fm.ascent / 2 - 2)
