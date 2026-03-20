@@ -21,7 +21,7 @@ class GroupManageDialog(
 ) : DialogWrapper(project) {
 
     private val service = LanChatService.getInstance()
-    private var group: Group? = service.getGroup(groupId)
+    private var group: Group? = null
 
     private val groupNameField = JTextField(20)
     private val memberListModel = DefaultListModel<Peer>()
@@ -36,10 +36,10 @@ class GroupManageDialog(
     init {
         title = "群聊详情"
         init()
-        loadData()
     }
 
     private fun loadData() {
+        group = service.getGroup(groupId)
         group?.let { g ->
             groupNameField.text = g.name
             val myId = service.currentUser?.id ?: "null"
@@ -67,6 +67,7 @@ class GroupManageDialog(
     }
 
     override fun createCenterPanel(): JComponent {
+        loadData()
         return JPanel(BorderLayout(0, 12)).apply {
             border = JBUI.Borders.empty(12)
             preferredSize = Dimension(580, 520)
