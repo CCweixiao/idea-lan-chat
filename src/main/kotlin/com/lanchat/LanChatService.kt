@@ -211,7 +211,7 @@ class LanChatService : Disposable {
             }
             if (changed) {
                 _peers.value = updated
-                updated.forEach { (id, peer) -> DatabaseManager.savePeer(peer) }
+                updated.values.forEach { DatabaseManager.savePeer(it) }
             }
         }
     }
