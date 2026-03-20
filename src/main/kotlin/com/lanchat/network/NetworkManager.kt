@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.lanchat.message.Message
 import com.lanchat.message.MessageType
 import com.lanchat.message.DiscoveryMessage
+import com.lanchat.util.CryptoManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -40,6 +41,21 @@ class NetworkManager(
 
     companion object {
         private const val DISCOVERY_INTERVAL = 5000L
+        private const val ENCRYPTED_PREFIX = "ENC:"
+    }
+
+    private fun encryptJson(json: String): String {
+        if (!CryptoManager.isEnabled) return json
+        return try {
+            ENCRYPTED_PREFIX + CryptoManager.encrypt(json)
+        } catch (_: Exception) { json }
+    }
+
+    private fun decryptJson(data: String): String {
+        if (!data.startsWith(ENCRYPTED_PREFIX)) return data
+        return try {
+            CryptoManager.decrypt(data.removePrefix(ENCRYPTED_PREFIX))
+        } catch (_: Exception) { data.removePrefix(ENCRYPTED_PREFIX) }
     }
 
     /**
@@ -78,7 +94,8 @@ class NetworkManager(
                 val packet = DatagramPacket(buffer, buffer.size)
                 udpSocket?.receive(packet) ?: break
 
-                val json = String(packet.data, 0, packet.length)
+                val raw = String(packet.data, 0, packet.length)
+                val json = decryptJson(raw)
                 val discoveryMsg = gson.fromJson(json, DiscoveryMessage::class.java)
 
                 if (discoveryMsg.userId != currentUserId) {
@@ -125,11 +142,11 @@ class NetworkManager(
             val writer = socket.getOutputStream().bufferedWriter()
             
             while (isRunning && !socket.isClosed) {
-                val json = reader.readLine() ?: break
+                val raw = reader.readLine() ?: break
                 try {
+                    val json = decryptJson(raw)
                     val message = gson.fromJson(json, Message::class.java)
                     
-                    // 处理探测请求：立即返回响应
                     if (message.type == MessageType.PROBE) {
                         val response = Message(
                             type = MessageType.PROBE_RESPONSE,
@@ -138,14 +155,12 @@ class NetworkManager(
                             content = "",
                             senderName = currentUsername
                         )
-                        val responseJson = gson.toJson(response)
+                        val responseJson = encryptJson(gson.toJson(response))
                         writer.write("$responseJson\n")
                         writer.flush()
-                        // 探测完成后关闭连接
                         break
                     }
                     
-                    // 其他消息发送到消息流
                     _messageReceived.emit(message)
                 } catch (_: Exception) { }
             }
@@ -172,7 +187,8 @@ class NetworkManager(
                 tcpPort = serverSocket?.localPort ?: tcpPort
             )
             val json = gson.toJson(discoveryMsg)
-            val data = json.toByteArray()
+            val encrypted = encryptJson(json)
+            val data = encrypted.toByteArray()
             val packet = DatagramPacket(data, data.size, broadcastAddress, udpPort)
             udpSocket?.send(packet)
         } catch (_: Exception) { }
@@ -183,11 +199,12 @@ class NetworkManager(
      */
     suspend fun sendMessage(message: Message, targetIp: String, targetPort: Int = tcpPort) {
         val json = gson.toJson(message)
+        val encrypted = encryptJson(json)
         withContext(Dispatchers.IO) {
             try {
                 Socket().use { socket ->
                     socket.connect(InetSocketAddress(targetIp, targetPort), 3000)
-                    socket.outputStream.write("$json\n".toByteArray())
+                    socket.outputStream.write("$encrypted\n".toByteArray())
                     socket.outputStream.flush()
                 }
             } catch (_: Exception) { }
@@ -208,19 +225,18 @@ class NetworkManager(
                     content = "",
                     senderName = currentUsername
                 )
-                val json = gson.toJson(probeMsg)
+                val encrypted = encryptJson(gson.toJson(probeMsg))
                 
                 Socket().use { socket ->
                     socket.soTimeout = timeoutMs.toInt()
                     socket.connect(InetSocketAddress(targetIp, targetPort), 3000)
                     
-                    // 发送探测请求
-                    socket.outputStream.write("$json\n".toByteArray())
+                    socket.outputStream.write("$encrypted\n".toByteArray())
                     socket.outputStream.flush()
                     
-                    // 等待响应
                     val reader = socket.getInputStream().bufferedReader()
-                    val responseJson = reader.readLine() ?: return@withContext null
+                    val raw = reader.readLine() ?: return@withContext null
+                    val responseJson = decryptJson(raw)
                     
                     val response = gson.fromJson(responseJson, Message::class.java)
                     if (response.type == MessageType.PROBE_RESPONSE) {
