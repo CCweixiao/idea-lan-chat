@@ -1,32 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 13 13" width="13" height="13">
   <!-- 背景圆 -->
-  <circle cx="50" cy="50" r="48" fill="#FF69B4"/>
-  
+  <circle cx="6.5" cy="6.5" r="6" fill="#FF69B4"/>
+
   <!-- 头发 -->
-  <ellipse cx="50" cy="35" rx="35" ry="30" fill="#1a1a1a"/>
-  
+  <ellipse cx="6.5" cy="4.5" rx="4.5" ry="4" fill="#1a1a1a"/>
+
   <!-- 脸 -->
-  <ellipse cx="50" cy="45" rx="28" ry="32" fill="#FFDAB9"/>
-  
+  <ellipse cx="6.5" cy="6" rx="3.5" ry="4" fill="#FFDAB9"/>
+
   <!-- 眼睛 -->
-  <ellipse cx="38" cy="42" rx="5" ry="6" fill="#2c1810"/>
-  <ellipse cx="62" cy="42" rx="5" ry="6" fill="#2c1810"/>
-  
+  <ellipse cx="5" cy="5.5" rx="0.7" ry="0.8" fill="#2c1810"/>
+  <ellipse cx="8" cy="5.5" rx="0.7" ry="0.8" fill="#2c1810"/>
+
   <!-- 眼睛高光 -->
-  <circle cx="40" cy="40" r="2" fill="white"/>
-  <circle cx="64" cy="40" r="2" fill="white"/>
-  
+  <circle cx="5.2" cy="5.2" r="0.3" fill="white"/>
+  <circle cx="8.2" cy="5.2" r="0.3" fill="white"/>
+
   <!-- 眉毛 -->
-  <path d="M 30 35 Q 38 32 46 35" stroke="#1a1a1a" stroke-width="2" fill="none"/>
-  <path d="M 54 35 Q 62 32 70 35" stroke="#1a1a1a" stroke-width="2" fill="none"/>
-  
+  <path d="M 4 4.5 Q 5 4 6 4.5" stroke="#1a1a1a" stroke-width="0.3" fill="none"/>
+  <path d="M 7 4.5 Q 8 4 9 4.5" stroke="#1a1a1a" stroke-width="0.3" fill="none"/>
+
   <!-- 鼻子 -->
-  <path d="M 50 45 L 48 55 L 52 55" stroke="#DEB887" stroke-width="2" fill="none"/>
-  
+  <path d="M 6.5 6 L 6.2 7 L 6.8 7" stroke="#DEB887" stroke-width="0.3" fill="none"/>
+
   <!-- 嘴巴 -->
-  <path d="M 40 62 Q 50 70 60 62" stroke="#FF69B4" stroke-width="3" fill="none"/>
-  
+  <path d="M 5 8 Q 6.5 9 8 8" stroke="#FF69B4" stroke-width="0.4" fill="none"/>
+
   <!-- 腮红 -->
-  <circle cx="30" cy="55" r="6" fill="#FFB6C1" opacity="0.5"/>
-  <circle cx="70" cy="55" r="6" fill="#FFB6C1" opacity="0.5"/>
+  <circle cx="4" cy="7" r="0.8" fill="#FFB6C1" opacity="0.5"/>
+  <circle cx="9" cy="7" r="0.8" fill="#FFB6C1" opacity="0.5"/>
 </svg>
