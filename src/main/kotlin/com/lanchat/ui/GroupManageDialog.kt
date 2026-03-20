@@ -31,6 +31,7 @@ class GroupManageDialog(
     private val memberCountLabel = JLabel()
 
     private var isOwner = false
+    private var debugInfo = ""
 
     init {
         title = "群聊详情"
@@ -41,6 +42,8 @@ class GroupManageDialog(
     private fun loadData() {
         group?.let { g ->
             groupNameField.text = g.name
+            val myId = service.currentUser?.id ?: "null"
+            debugInfo = "myId=$myId, ownerId=${g.ownerId}, equals=${myId == g.ownerId}"
             isOwner = service.isGroupOwner(groupId)
             groupNameField.isEditable = isOwner
             loadMembers()
@@ -226,7 +229,7 @@ class GroupManageDialog(
                 border = BorderFactory.createLineBorder(JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1)
             }, BorderLayout.CENTER)
 
-            add(JLabel("你不是群主，无法管理成员").apply {
+            add(JLabel("你不是群主，无法管理成员 ($debugInfo)").apply {
                 font = Font("Microsoft YaHei", Font.PLAIN, 11); foreground = JBColor.GRAY
                 horizontalAlignment = SwingConstants.CENTER; border = JBUI.Borders.emptyTop(8)
             }, BorderLayout.SOUTH)
