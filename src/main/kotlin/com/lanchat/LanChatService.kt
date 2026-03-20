@@ -44,6 +44,9 @@ class LanChatService : Disposable {
     private val _unreadCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val unreadCounts: StateFlow<Map<String, Int>> = _unreadCounts
 
+    private val _blockedPeerIds = MutableStateFlow<Set<String>>(emptySet())
+    val blockedPeerIds: StateFlow<Set<String>> = _blockedPeerIds
+
     private var _currentUser: Peer? = null
     val currentUser: Peer? get() = _currentUser
 
@@ -107,6 +110,7 @@ class LanChatService : Disposable {
         _friendRequests.value = DatabaseManager.loadFriendRequests()
         _groupRequests.value = DatabaseManager.loadGroupRequests()
         _unreadCounts.value = DatabaseManager.getUnreadCounts(userId)
+        _blockedPeerIds.value = DatabaseManager.loadBlockedPeers()
 
         migrateGroupNumbers()
 
@@ -127,8 +131,22 @@ class LanChatService : Disposable {
                 launch { nm.messageReceived.collect { message -> handleReceivedMessage(message) } }
 
                 nm.peerDiscovered.collect { peer ->
-                    addPeer(peer)
-                    autoAcceptFriendRequests(peer)
+                    // 检查是否在黑名单中，黑名单中的用户不自动添加
+                    if (!_blockedPeerIds.value.contains(peer.id)) {
+                        // 检查是否有相同用户名的手动添加用户，如果有则删除旧记录使用真实ID
+                        val manualPeer = _peers.value.values.find {
+                            it.id.startsWith("manual_") && it.username == peer.username
+                        }
+                        if (manualPeer != null) {
+                            // 删除旧的手动添加记录
+                            val m = _peers.value.toMutableMap()
+                            m.remove(manualPeer.id)
+                            _peers.value = m
+                            DatabaseManager.deletePeer(manualPeer.id)
+                        }
+                        addPeer(peer)
+                        autoAcceptFriendRequests(peer)
+                    }
                 }
             }
         }
@@ -222,12 +240,17 @@ class LanChatService : Disposable {
         if (message.senderId == _currentUser?.id && message.type != MessageType.FRIEND_REQUEST) return
         when (message.type) {
             MessageType.GROUP_SYNC -> handleGroupSync(message)
+            MessageType.GROUP_LEAVE -> handleGroupLeave(message)
             MessageType.FRIEND_REQUEST -> handleIncomingFriendRequest(message)
             MessageType.FRIEND_RESPONSE -> handleFriendResponse(message)
             MessageType.GROUP_INVITE -> handleGroupInvite(message)
             MessageType.GROUP_INVITE_RESPONSE -> handleGroupInviteResponse(message)
             MessageType.MESSAGE_READ_ACK -> handleMessageReadAck(message)
             else -> {
+                // 对于群聊消息，检查用户是否还在群中
+                if (isGroupMessage(message) && !isMemberOfGroup(message.groupId)) {
+                    return // 非群成员不接收新消息，但历史记录保留
+                }
                 addMessageToHistory(message)
                 notifyMessageListeners(message)
 
@@ -370,13 +393,28 @@ class LanChatService : Disposable {
     }
 
     fun addManualPeer(ipAddress: String, port: Int, name: String): Boolean {
+        // 检查是否已存在（通过 IP+port）
         if (_peers.value.values.any { it.ipAddress == ipAddress && it.port == port }) return false
+
+        // 使用稳定的 ID（基于 IP+port 的哈希），避免同一用户多次添加产生多条记录
+        val stableId = "manual_${ipAddress}_${port}".hashCode().toString()
         val peer = Peer(
-            id = "manual_${System.currentTimeMillis()}",
+            id = stableId,
             username = name, ipAddress = ipAddress, port = port, isOnline = true
         )
         addPeer(peer)
+        // 从黑名单中移除（如果存在）
+        unblockPeer(stableId)
         return true
+    }
+
+    private fun unblockPeer(peerId: String) {
+        if (_blockedPeerIds.value.contains(peerId)) {
+            val blocked = _blockedPeerIds.value.toMutableSet()
+            blocked.remove(peerId)
+            _blockedPeerIds.value = blocked
+            DatabaseManager.removeBlockedPeer(peerId)
+        }
     }
 
     fun isPeerExists(ipAddress: String, port: Int): Boolean {
@@ -386,6 +424,11 @@ class LanChatService : Disposable {
     fun removePeer(peerId: String) {
         val m = _peers.value.toMutableMap(); m.remove(peerId); _peers.value = m
         DatabaseManager.deletePeer(peerId)
+        // 添加到黑名单，防止自动加回
+        val blocked = _blockedPeerIds.value.toMutableSet()
+        blocked.add(peerId)
+        _blockedPeerIds.value = blocked
+        DatabaseManager.addBlockedPeer(peerId)
     }
 
     fun searchPeersByIp(ip: String): List<Peer> =
@@ -806,6 +849,12 @@ class LanChatService : Disposable {
         val message: String = ""
     )
 
+    data class GroupLeavePayload(
+        val groupId: String,
+        val leaverId: String,
+        val leaverName: String
+    )
+
     fun inviteToGroup(groupId: String, peerId: String) {
         val cu = _currentUser ?: return
         val group = _groups.value[groupId] ?: return
@@ -1024,6 +1073,69 @@ class LanChatService : Disposable {
         DatabaseManager.deleteGroupRequest(requestId)
     }
 
+    // =============== Group Leave ===============
+
+    /**
+     * 退出群聊
+     * 发送退群请求给群主，群主收到后将自己从群成员中移除
+     */
+    fun leaveGroup(groupId: String): Boolean {
+        val userId = _currentUser?.id ?: return false
+        val group = _groups.value[groupId] ?: return false
+
+        // 只有群成员可以退群，群主不能退群（只能解散群）
+        if (group.isOwner(userId)) return false
+        if (!group.isMember(userId)) return false
+
+        // 发送退群消息给群主
+        val payload = GroupLeavePayload(
+            groupId = groupId,
+            leaverId = userId,
+            leaverName = _username
+        )
+        val message = Message(
+            type = MessageType.GROUP_LEAVE,
+            senderId = userId,
+            receiverId = group.ownerId,
+            content = gson.toJson(payload),
+            senderName = _username
+        )
+
+        scope.launch {
+            val ownerTarget = resolvePeerTarget(group.ownerId)
+            if (ownerTarget != null) {
+                networkManager?.sendMessage(message, ownerTarget.first, ownerTarget.second)
+            }
+        }
+
+        // 本地立即从群组中移除（显示效果）
+        // 但保留历史记录
+        val m = _groups.value.toMutableMap()
+        val localGroup = m[groupId]?.copy(
+            memberIds = group.memberIds.filter { it != userId }.toMutableList()
+        )
+        if (localGroup != null) {
+            m[groupId] = localGroup
+            _groups.value = m
+        }
+        return true
+    }
+
+    private fun handleGroupLeave(message: Message) {
+        val payload = try {
+            gson.fromJson(message.content, GroupLeavePayload::class.java)
+        } catch (_: Exception) { return }
+
+        val group = _groups.value[payload.groupId] ?: return
+        val userId = _currentUser?.id ?: return
+
+        // 只有群主处理退群请求
+        if (!group.isOwner(userId)) return
+
+        // 移除成员
+        removeGroupMember(payload.groupId, payload.leaverId)
+    }
+
     // =============== User Settings ===============
 
     fun updateUsername(newUsername: String) {
@@ -1225,6 +1337,21 @@ class LanChatService : Disposable {
         val m = _friendRequests.value.toMutableMap()
         m.remove(requestId); _friendRequests.value = m
         DatabaseManager.deleteFriendRequest(requestId)
+    }
+
+    // =============== Helper Functions ===============
+
+    private fun isGroupMessage(message: Message): Boolean {
+        return message.type == MessageType.GROUP_CHAT ||
+               message.type == MessageType.MENTION_MEMBER ||
+               message.type == MessageType.MENTION_ALL
+    }
+
+    private fun isMemberOfGroup(groupId: String?): Boolean {
+        if (groupId == null) return false
+        val group = _groups.value[groupId] ?: return false
+        val userId = _currentUser?.id ?: return false
+        return group.isMember(userId)
     }
 
     private fun autoAcceptFriendRequests(peer: Peer) {

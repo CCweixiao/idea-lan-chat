@@ -125,6 +125,13 @@ object DatabaseManager {
             )
         """)
 
+        executeUpdate("""
+            CREATE TABLE IF NOT EXISTS blocked_peers (
+                peer_id TEXT PRIMARY KEY,
+                blocked_at INTEGER NOT NULL
+            )
+        """)
+
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)")
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id)")
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)")
@@ -675,6 +682,50 @@ object DatabaseManager {
                 stmt.setString(1, requestId); stmt.executeUpdate()
             }
         } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    // =============== Blocked Peers ===============
+
+    fun addBlockedPeer(peerId: String) {
+        try {
+            val sql = "INSERT OR REPLACE INTO blocked_peers (peer_id, blocked_at) VALUES (?, ?)"
+            connection?.prepareStatement(sql)?.use { stmt ->
+                stmt.setString(1, peerId)
+                stmt.setLong(2, System.currentTimeMillis())
+                stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    fun removeBlockedPeer(peerId: String) {
+        try {
+            connection?.prepareStatement("DELETE FROM blocked_peers WHERE peer_id = ?")?.use { stmt ->
+                stmt.setString(1, peerId); stmt.executeUpdate()
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    fun loadBlockedPeers(): Set<String> {
+        val blocked = mutableSetOf<String>()
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeQuery("SELECT peer_id FROM blocked_peers")?.use { rs ->
+                    while (rs.next()) {
+                        blocked.add(rs.getString("peer_id"))
+                    }
+                }
+            }
+        } catch (e: Exception) { e.printStackTrace() }
+        return blocked
+    }
+
+    fun isPeerBlocked(peerId: String): Boolean {
+        return try {
+            connection?.prepareStatement("SELECT 1 FROM blocked_peers WHERE peer_id = ?")?.use { stmt ->
+                stmt.setString(1, peerId)
+                stmt.executeQuery()?.next() ?: false
+            } ?: false
+        } catch (e: Exception) { false }
     }
 
     fun close() {

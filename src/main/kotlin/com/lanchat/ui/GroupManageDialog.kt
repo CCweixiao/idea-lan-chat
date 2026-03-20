@@ -230,10 +230,43 @@ class GroupManageDialog(
                 border = BorderFactory.createLineBorder(JBColor(Color(220, 220, 220), Color(60, 60, 60)), 1)
             }, BorderLayout.CENTER)
 
-            add(JLabel("你不是群主，无法管理成员 ($debugInfo)").apply {
-                font = Font("Microsoft YaHei", Font.PLAIN, 11); foreground = JBColor.GRAY
-                horizontalAlignment = SwingConstants.CENTER; border = JBUI.Borders.emptyTop(8)
-            }, BorderLayout.SOUTH)
+            val buttonPanel = JPanel(FlowLayout(FlowLayout.CENTER, 0, 8)).apply {
+                isOpaque = false
+                border = JBUI.Borders.emptyTop(4)
+
+                add(JLabel("你不是群主，无法管理成员").apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 11); foreground = JBColor.GRAY
+                })
+
+                add(createStyledButton("退出群聊", Color(220, 50, 50)) {
+                    val confirm = JOptionPane.showConfirmDialog(
+                        this@GroupManageDialog.window,
+                        "确定要退出群聊「${group?.name}」吗？\n退出后将无法再接收群消息，但聊天记录会保留。",
+                        "确认退群",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.WARNING_MESSAGE
+                    )
+                    if (confirm == JOptionPane.YES_OPTION) {
+                        if (service.leaveGroup(groupId)) {
+                            JOptionPane.showMessageDialog(
+                                this@GroupManageDialog.window,
+                                "已退出群聊",
+                                "成功",
+                                JOptionPane.INFORMATION_MESSAGE
+                            )
+                            close(OK_EXIT_CODE)
+                        } else {
+                            JOptionPane.showMessageDialog(
+                                this@GroupManageDialog.window,
+                                "退群失败，你是群主无法退群",
+                                "提示",
+                                JOptionPane.WARNING_MESSAGE
+                            )
+                        }
+                    }
+                })
+            }
+            add(buttonPanel, BorderLayout.SOUTH)
         }
     }
 
