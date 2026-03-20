@@ -9,6 +9,7 @@ import com.lanchat.message.Message
 import com.lanchat.message.MessageType
 import com.lanchat.network.*
 import com.lanchat.ui.settings.LanChatSettings
+import com.lanchat.util.UserIdGenerator
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -90,9 +91,13 @@ class LanChatService : Disposable {
         _username = DatabaseManager.getSetting("username", _username)
         _userAvatar = DatabaseManager.getSetting("userAvatar")
 
+        // 使用 MAC 地址生成唯一用户 ID
         val savedUserId = DatabaseManager.getSetting("currentUserId")
-        val userId = if (savedUserId.isNotEmpty()) savedUserId else {
-            val newId = java.util.UUID.randomUUID().toString()
+        val userId = if (savedUserId.isNotEmpty() && UserIdGenerator.isValidUserId(savedUserId)) {
+            savedUserId
+        } else {
+            // 生成基于 MAC 地址的唯一 ID
+            val newId = UserIdGenerator.generateUserId()
             DatabaseManager.saveSetting("currentUserId", newId)
             newId
         }
@@ -1146,6 +1151,36 @@ class LanChatService : Disposable {
     }
 
     fun refreshPeers() { networkManager?.sendDiscovery() }
+
+    /**
+     * 刷新用户 ID
+     * 如果当前 ID 无效（缺失或格式错误），则根据 MAC 地址重新生成
+     * 用于修复之前使用 UUID 导致的 ID 不稳定问题
+     *
+     * @return true 如果 ID 被重新生成，false 如果 ID 有效无需更改
+     */
+    fun refreshUserId(): Boolean {
+        val currentUserId = _currentUser?.id ?: return false
+
+        // 检查当前 ID 是否有效（32位十六进制字符串）
+        if (UserIdGenerator.isValidUserId(currentUserId)) {
+            return false // ID 有效，无需更改
+        }
+
+        // 重新生成基于 MAC 地址的唯一 ID
+        val newId = UserIdGenerator.generateUserId()
+
+        // 更新数据库
+        DatabaseManager.saveSetting("currentUserId", newId)
+
+        // 更新当前用户
+        _currentUser = _currentUser?.copy(id = newId)
+
+        // 更新 NetworkManager 的用户 ID
+        networkManager?.updateUserId(newId)
+
+        return true
+    }
 
     // =============== Bot Management ===============
 

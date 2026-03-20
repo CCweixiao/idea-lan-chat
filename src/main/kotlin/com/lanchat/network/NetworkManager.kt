@@ -256,6 +256,10 @@ class NetworkManager(
         currentUsername = newUsername
     }
 
+    fun updateUserId(newUserId: String) {
+        currentUserId = newUserId
+    }
+
     fun sendDiscovery() {
         scope.launch { sendDiscoveryInternal() }
     }
