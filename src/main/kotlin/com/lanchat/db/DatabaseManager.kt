@@ -78,7 +78,9 @@ object DatabaseManager {
                 owner_id TEXT NOT NULL,
                 member_ids TEXT NOT NULL,
                 created_at INTEGER,
-                group_number TEXT DEFAULT ''
+                group_number TEXT DEFAULT '',
+                muted_members TEXT DEFAULT '{}',
+                global_mute INTEGER DEFAULT 0
             )
         """)
 
@@ -161,6 +163,16 @@ object DatabaseManager {
         try {
             connection?.createStatement()?.use { stmt ->
                 stmt.executeUpdate("ALTER TABLE messages ADD COLUMN read_by_user_names TEXT DEFAULT '[]'")
+            }
+        } catch (_: Exception) { }
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("ALTER TABLE groups ADD COLUMN muted_members TEXT DEFAULT '{}'")
+            }
+        } catch (_: Exception) { }
+        try {
+            connection?.createStatement()?.use { stmt ->
+                stmt.executeUpdate("ALTER TABLE groups ADD COLUMN global_mute INTEGER DEFAULT 0")
             }
         } catch (_: Exception) { }
     }
@@ -482,14 +494,16 @@ object DatabaseManager {
     fun saveGroup(group: Group) {
         try {
             val sql = """
-                INSERT OR REPLACE INTO groups 
-                (id, name, owner_id, member_ids, created_at, group_number) 
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO groups
+                (id, name, owner_id, member_ids, created_at, group_number, muted_members, global_mute)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
             connection?.prepareStatement(sql)?.use { stmt ->
                 stmt.setString(1, group.id); stmt.setString(2, group.name)
                 stmt.setString(3, group.ownerId); stmt.setString(4, gson.toJson(group.memberIds))
                 stmt.setLong(5, group.createdAt); stmt.setString(6, group.groupNumber)
+                stmt.setString(7, gson.toJson(group.mutedMembers))
+                stmt.setInt(8, if (group.globalMute) 1 else 0)
                 stmt.executeUpdate()
             }
         } catch (e: Exception) { e.printStackTrace() }
@@ -508,13 +522,20 @@ object DatabaseManager {
                         } catch (_: Exception) { emptyList() }
 
                         val groupNumber = try { rs.getString("group_number") ?: "" } catch (_: Exception) { "" }
+                        val mutedMembers: MutableMap<String, Long> = try {
+                            val json = rs.getString("muted_members") ?: "{}"
+                            gson.fromJson(json, object : TypeToken<MutableMap<String, Long>>() {}.type) ?: mutableMapOf()
+                        } catch (_: Exception) { mutableMapOf() }
+                        val globalMute = try { rs.getInt("global_mute") == 1 } catch (_: Exception) { false }
 
                         val group = Group(
                             id = rs.getString("id"), name = rs.getString("name"),
                             ownerId = rs.getString("owner_id"),
                             memberIds = memberIds.toMutableList(),
                             createdAt = rs.getLong("created_at"),
-                            groupNumber = groupNumber
+                            groupNumber = groupNumber,
+                            mutedMembers = mutedMembers,
+                            globalMute = globalMute
                         )
                         groups[group.id] = group
                     }

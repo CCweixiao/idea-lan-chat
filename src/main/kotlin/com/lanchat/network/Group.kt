@@ -9,7 +9,9 @@ data class Group(
     val memberIds: MutableList<String> = mutableListOf(),
     val createdAt: Long = System.currentTimeMillis(),
     val avatar: String? = null,
-    val groupNumber: String = ""
+    val groupNumber: String = "",
+    val mutedMembers: MutableMap<String, Long> = mutableMapOf(),
+    val globalMute: Boolean = false
 ) {
     fun isOwner(userId: String): Boolean = userId == ownerId
     fun isMember(userId: String): Boolean = memberIds.contains(userId)
@@ -27,4 +29,21 @@ data class Group(
         if (memberId == ownerId) return false
         return memberIds.remove(memberId)
     }
+
+    /**
+     * @return true if the user is currently muted (owner is never muted)
+     */
+    fun isMuted(userId: String): Boolean {
+        if (isOwner(userId)) return false
+        if (globalMute) return true
+        val unmuteAt = mutedMembers[userId] ?: return false
+        if (unmuteAt == -1L) return true
+        if (System.currentTimeMillis() >= unmuteAt) {
+            mutedMembers.remove(userId)
+            return false
+        }
+        return true
+    }
+
+    fun getMuteExpiry(userId: String): Long? = mutedMembers[userId]
 }
