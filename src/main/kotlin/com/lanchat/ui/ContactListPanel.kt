@@ -439,16 +439,7 @@ class ContactListPanel(
     // =============== Actions ===============
 
     private fun showAddContactDialog() {
-        val dialog = AddContactDialog(project)
-        if (dialog.showAndGet()) {
-            if (dialog.isAddSelf) {
-                service.addManualPeer(service.localIp, 8889, "${service.username} (自己)")
-            } else {
-                dialog.selectedPeer?.let { peer ->
-                    service.addManualPeer(peer.ipAddress, peer.port, peer.username)
-                }
-            }
-        }
+        AddContactDialog(project).showAndGet()
     }
 
     private fun showCreateGroupDialog() {
