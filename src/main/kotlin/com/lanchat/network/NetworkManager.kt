@@ -2,6 +2,7 @@ package com.lanchat.network
 
 import com.google.gson.Gson
 import com.lanchat.message.Message
+import com.lanchat.message.MessageType
 import com.lanchat.message.DiscoveryMessage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -120,10 +121,30 @@ class NetworkManager {
     private suspend fun handleClientConnection(socket: Socket) {
         try {
             val reader = socket.getInputStream().bufferedReader()
+            val writer = socket.getOutputStream().bufferedWriter()
+            
             while (isRunning && !socket.isClosed) {
                 val json = reader.readLine() ?: break
                 try {
                     val message = gson.fromJson(json, Message::class.java)
+                    
+                    // 处理探测请求：立即返回响应
+                    if (message.type == MessageType.PROBE) {
+                        val response = Message(
+                            type = MessageType.PROBE_RESPONSE,
+                            senderId = currentUserId,
+                            receiverId = message.senderId,
+                            content = "",
+                            senderName = currentUsername
+                        )
+                        val responseJson = gson.toJson(response)
+                        writer.write("$responseJson\n")
+                        writer.flush()
+                        // 探测完成后关闭连接
+                        break
+                    }
+                    
+                    // 其他消息发送到消息流
                     _messageReceived.emit(message)
                 } catch (_: Exception) { }
             }
@@ -169,6 +190,53 @@ class NetworkManager {
                     socket.outputStream.flush()
                 }
             } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * 探测指定IP:端口的用户信息
+     * @return 探测结果，成功返回 Peer，失败返回 null
+     */
+    suspend fun probePeer(targetIp: String, targetPort: Int = tcpPort, timeoutMs: Long = 5000): Peer? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val probeMsg = Message(
+                    type = MessageType.PROBE,
+                    senderId = currentUserId,
+                    receiverId = "",
+                    content = "",
+                    senderName = currentUsername
+                )
+                val json = gson.toJson(probeMsg)
+                
+                Socket().use { socket ->
+                    socket.soTimeout = timeoutMs.toInt()
+                    socket.connect(InetSocketAddress(targetIp, targetPort), 3000)
+                    
+                    // 发送探测请求
+                    socket.outputStream.write("$json\n".toByteArray())
+                    socket.outputStream.flush()
+                    
+                    // 等待响应
+                    val reader = socket.getInputStream().bufferedReader()
+                    val responseJson = reader.readLine() ?: return@withContext null
+                    
+                    val response = gson.fromJson(responseJson, Message::class.java)
+                    if (response.type == MessageType.PROBE_RESPONSE) {
+                        Peer(
+                            id = response.senderId,
+                            username = response.senderName ?: "未知用户",
+                            ipAddress = targetIp,
+                            port = targetPort,
+                            isOnline = true
+                        )
+                    } else {
+                        null
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 

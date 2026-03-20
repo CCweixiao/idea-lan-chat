@@ -18,7 +18,9 @@ enum class MessageType {
     FRIEND_RESPONSE,
     GROUP_INVITE,
     GROUP_INVITE_RESPONSE,
-    MESSAGE_READ_ACK    // 群消息已读回执
+    MESSAGE_READ_ACK,    // 群消息已读回执
+    PROBE,               // 探测请求
+    PROBE_RESPONSE       // 探测响应
 }
 
 /**

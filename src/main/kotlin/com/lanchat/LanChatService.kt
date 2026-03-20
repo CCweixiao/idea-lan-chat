@@ -343,6 +343,14 @@ class LanChatService : Disposable {
     fun searchPeersByIp(ip: String): List<Peer> =
         _peers.value.values.filter { it.ipAddress.contains(ip) }
 
+    /**
+     * 探测指定IP:端口的用户信息
+     * 用于在添加好友前确认对方在线并获取基本信息
+     */
+    suspend fun probePeer(ipAddress: String, port: Int): Peer? {
+        return networkManager?.probePeer(ipAddress, port)
+    }
+
     private fun resolvePeerTarget(memberId: String): Pair<String, Int>? {
         val peer = _peers.value[memberId] ?: return null
         return Pair(peer.ipAddress, peer.port)
