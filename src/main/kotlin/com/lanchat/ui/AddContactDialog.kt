@@ -37,7 +37,6 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
             addTab("好友申请", createFriendRequestTab())
             addTab("添加联系人", createAddContactTab())
-            addTab("邀请入群", createInviteToGroupTab())
             addTab("申请记录", createRequestHistoryTab())
         }
         return JPanel(BorderLayout()).apply {
@@ -78,16 +77,27 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                 add(JScrollPane(requestList).apply {
                     border = createListBorder(); preferredSize = Dimension(0, 140)
                 }, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 10, 4)).apply {
                     isOpaque = false
-                    add(createGreenButton("通过") {
-                        val s = requestList.selectedValue ?: return@createGreenButton
-                        service.acceptFriendRequest(s.id); loadRequests()
-                        JOptionPane.showMessageDialog(window, "已添加 ${s.fromUsername} 为好友", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    add(JButton("通过").apply {
+                        font = Font("Microsoft YaHei", Font.BOLD, 13)
+                        background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
+                        isBorderPainted = false; isFocusPainted = false; isOpaque = true
+                        cursor = Cursor(Cursor.HAND_CURSOR)
+                        addActionListener {
+                            val s = requestList.selectedValue ?: return@addActionListener
+                            service.acceptFriendRequest(s.id); loadRequests()
+                            JOptionPane.showMessageDialog(window, "已添加 ${s.fromUsername} 为好友", "成功", JOptionPane.INFORMATION_MESSAGE)
+                        }
                     })
-                    add(createRedButton("拒绝") {
-                        val s = requestList.selectedValue ?: return@createRedButton
-                        service.rejectFriendRequest(s.id); loadRequests()
+                    add(JButton("拒绝").apply {
+                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
+                        isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
+                        addActionListener {
+                            val s = requestList.selectedValue ?: return@addActionListener
+                            service.rejectFriendRequest(s.id); loadRequests()
+                        }
                     })
                 }, BorderLayout.SOUTH)
             }
@@ -101,16 +111,27 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                 add(JScrollPane(groupRequestList).apply {
                     border = createListBorder(); preferredSize = Dimension(0, 120)
                 }, BorderLayout.CENTER)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                add(JPanel(FlowLayout(FlowLayout.LEFT, 10, 4)).apply {
                     isOpaque = false
-                    add(createGreenButton("同意") {
-                        val s = groupRequestList.selectedValue ?: return@createGreenButton
-                        service.acceptGroupInvite(s.id); loadRequests()
-                        JOptionPane.showMessageDialog(window, "已处理", "成功", JOptionPane.INFORMATION_MESSAGE)
+                    add(JButton("同意").apply {
+                        font = Font("Microsoft YaHei", Font.BOLD, 13)
+                        background = ThemeManager.primaryButtonColor; foreground = ThemeManager.primaryButtonText
+                        isBorderPainted = false; isFocusPainted = false; isOpaque = true
+                        cursor = Cursor(Cursor.HAND_CURSOR)
+                        addActionListener {
+                            val s = groupRequestList.selectedValue ?: return@addActionListener
+                            service.acceptGroupInvite(s.id); loadRequests()
+                            JOptionPane.showMessageDialog(window, "已处理", "成功", JOptionPane.INFORMATION_MESSAGE)
+                        }
                     })
-                    add(createRedButton("拒绝") {
-                        val s = groupRequestList.selectedValue ?: return@createRedButton
-                        service.rejectGroupInvite(s.id); loadRequests()
+                    add(JButton("拒绝").apply {
+                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        foreground = JBColor(Color(220, 50, 50), Color(230, 80, 80))
+                        isFocusPainted = false; cursor = Cursor(Cursor.HAND_CURSOR)
+                        addActionListener {
+                            val s = groupRequestList.selectedValue ?: return@addActionListener
+                            service.rejectGroupInvite(s.id); loadRequests()
+                        }
                     })
                 }, BorderLayout.SOUTH)
             }
@@ -226,84 +247,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
         }
     }
 
-    // =============== Tab 2: Invite to Group ===============
-
-    private fun createInviteToGroupTab(): JPanel {
-        // 好友列表
-        val friendListModel = DefaultListModel<Peer>()
-        val friendList = JList(friendListModel).apply {
-            cellRenderer = PeerCellRenderer()
-            fixedCellHeight = 56
-            selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
-            background = JBColor(Color(250, 250, 250), Color(45, 45, 45))
-        }
-
-        // 群聊下拉
-        val groupComboBox = JComboBox<String>()
-        fun refreshGroups() {
-            groupComboBox.removeAllItems()
-            service.groups.value.values.forEach { g ->
-                groupComboBox.addItem("${g.name} (群号: ${g.groupNumber})")
-            }
-        }
-        refreshGroups()
-
-        // 加载好友
-        fun loadFriends() {
-            friendListModel.clear()
-            service.peers.value.values.forEach { friendListModel.addElement(it) }
-        }
-        loadFriends()
-
-        return JPanel(BorderLayout(0, 8)).apply {
-            border = JBUI.Borders.empty(8)
-
-            // 顶部：选择群聊
-            add(JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
-                isOpaque = false
-                add(JLabel("选择群聊:").apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) })
-                add(groupComboBox)
-                add(createSmallButton("刷新") { refreshGroups(); loadFriends() })
-            }, BorderLayout.NORTH)
-
-            // 中间：好友列表
-            add(JScrollPane(friendList).apply { border = createListBorder() }, BorderLayout.CENTER)
-
-            // 底部：邀请按钮
-            add(JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
-                isOpaque = false
-                add(createGreenButton("邀请选中好友入群") {
-                    val selectedFriends = friendList.selectedValuesList
-                    if (selectedFriends.isEmpty()) {
-                        JOptionPane.showMessageDialog(window, "请先选择要邀请的好友", "提示", JOptionPane.WARNING_MESSAGE)
-                        return@createGreenButton
-                    }
-                    val groupIndex = groupComboBox.selectedIndex
-                    val groups = service.groups.value.values.toList()
-                    if (groupIndex < 0 || groupIndex >= groups.size) {
-                        JOptionPane.showMessageDialog(window, "请先选择一个群聊（需要先创建群）", "提示", JOptionPane.WARNING_MESSAGE)
-                        return@createGreenButton
-                    }
-                    val group = groups[groupIndex]
-                    val currentUserId = service.currentUser?.id ?: return@createGreenButton
-                    if (group.ownerId != currentUserId) {
-                        JOptionPane.showMessageDialog(window, "只有群主才能邀请成员", "提示", JOptionPane.WARNING_MESSAGE)
-                        return@createGreenButton
-                    }
-                    val names = selectedFriends.joinToString("、") { it.username }
-                    selectedFriends.forEach { friend ->
-                        service.inviteToGroup(group.id, friend.id)
-                    }
-                    JOptionPane.showMessageDialog(window, "已邀请 $names 加入「${group.name}」", "成功", JOptionPane.INFORMATION_MESSAGE)
-                })
-                add(JLabel("提示：按住 Ctrl 可多选好友").apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 11); foreground = JBColor.GRAY
-                })
-            }, BorderLayout.SOUTH)
-        }
-    }
-
-    // =============== Tab 3: Request History ===============
+    // =============== Tab 2: Request History ===============
 
     private fun createRequestHistoryTab(): JPanel {
         val historyListModel = DefaultListModel<Any>()
