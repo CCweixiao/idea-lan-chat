@@ -247,8 +247,8 @@ class DiscoverPeersDialog(private val project: Project) : DialogWrapper(project)
      * 发送好友申请
      */
     private fun sendFriendRequest(peer: Peer) {
-        // 直接添加为好友（简化流程）
-        val success = service.addManualPeer(peer.ipAddress, peer.port, peer.username)
+        // 直接添加为好友（简化流程），使用对方的真实 userId
+        val success = service.addManualPeer(peer.ipAddress, peer.port, peer.username, peer.id)
         
         if (success) {
             sentRequests[peer.id] = true

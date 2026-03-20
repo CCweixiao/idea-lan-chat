@@ -138,16 +138,16 @@ class LanChatService : Disposable {
                 nm.peerDiscovered.collect { peer ->
                     // 检查是否在黑名单中，黑名单中的用户不自动添加
                     if (!_blockedPeerIds.value.contains(peer.id)) {
-                        // 检查是否有相同用户名的手动添加用户，如果有则删除旧记录使用真实ID
-                        val manualPeer = _peers.value.values.find {
-                            it.id.startsWith("manual_") && it.username == peer.username
+                        // 检查是否有相同 IP+port 的旧记录（可能是手动添加的临时ID）
+                        val existingPeer = _peers.value.values.find {
+                            it.ipAddress == peer.ipAddress && it.port == peer.port
                         }
-                        if (manualPeer != null) {
-                            // 删除旧的手动添加记录
+                        if (existingPeer != null && existingPeer.id != peer.id) {
+                            // 找到相同 IP+port 但 ID 不同的记录，删除旧记录使用真实 userId
                             val m = _peers.value.toMutableMap()
-                            m.remove(manualPeer.id)
+                            m.remove(existingPeer.id)
                             _peers.value = m
-                            DatabaseManager.deletePeer(manualPeer.id)
+                            DatabaseManager.deletePeer(existingPeer.id)
                         }
                         addPeer(peer)
                         autoAcceptFriendRequests(peer)
@@ -397,19 +397,27 @@ class LanChatService : Disposable {
         ))
     }
 
-    fun addManualPeer(ipAddress: String, port: Int, name: String): Boolean {
+    /**
+     * 手动添加好友
+     * @param ipAddress IP 地址
+     * @param port 端口
+     * @param name 用户名
+     * @param userId 可选的用户真实 ID（从探测或好友申请中获取）
+     * @return 是否添加成功
+     */
+    fun addManualPeer(ipAddress: String, port: Int, name: String, userId: String? = null): Boolean {
         // 检查是否已存在（通过 IP+port）
         if (_peers.value.values.any { it.ipAddress == ipAddress && it.port == port }) return false
 
-        // 使用稳定的 ID（基于 IP+port 的哈希），避免同一用户多次添加产生多条记录
-        val stableId = "manual_${ipAddress}_${port}".hashCode().toString()
+        // 优先使用真实 userId，如果没有则使用基于 IP+port 的稳定临时 ID
+        val finalUserId = userId ?: "manual_${ipAddress}_${port}".hashCode().toString()
         val peer = Peer(
-            id = stableId,
+            id = finalUserId,
             username = name, ipAddress = ipAddress, port = port, isOnline = true
         )
         addPeer(peer)
         // 从黑名单中移除（如果存在）
-        unblockPeer(stableId)
+        unblockPeer(finalUserId)
         return true
     }
 
@@ -1266,7 +1274,8 @@ class LanChatService : Disposable {
         m[requestId] = updated; _friendRequests.value = m
         DatabaseManager.saveFriendRequest(updated)
 
-        addManualPeer(request.fromIp, request.fromPort, request.fromUsername)
+        // 使用对方的真实 userId
+        addManualPeer(request.fromIp, request.fromPort, request.fromUsername, request.fromUserId)
 
         val cu = _currentUser ?: return
         val payload = FriendRequestPayload(
@@ -1330,7 +1339,8 @@ class LanChatService : Disposable {
                     m[sentRequest.id] = updated; _friendRequests.value = m
                     DatabaseManager.saveFriendRequest(updated)
                 }
-                addManualPeer(payload.fromIp, payload.fromPort, payload.fromUsername)
+                // 使用对方的真实 userId
+                addManualPeer(payload.fromIp, payload.fromPort, payload.fromUsername, payload.fromUserId)
             }
             "REJECT" -> {
                 val m = _friendRequests.value.toMutableMap()
