@@ -2,12 +2,16 @@ package com.lanchat.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
 import com.lanchat.ui.settings.LanChatSettings
 import java.awt.*
 import java.awt.event.ActionListener
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.*
 
 /**
@@ -16,16 +20,20 @@ import javax.swing.*
 class LanChatMainPanel(private val project: Project) : JPanel(BorderLayout()) {
     
     private val service = LanChatService.getInstance()
-    private lateinit var splitter: JSplitPane
     private lateinit var contactListPanel: ContactListPanel
     private lateinit var chatPanel: ChatPanel
+    private lateinit var splitter: JSplitPane
+    private lateinit var centerPanel: JPanel
+    private lateinit var miniBar: MiniChatBar
+    
     private var isContactListHidden = false
     private var isChatMinimized = false
     private var lastDividerLocation = 200
     
     init {
         // 加载保存的主题设置
-        LanChatSettings().loadState(LanChatSettings().state)
+        val settings = LanChatSettings()
+        settings.loadState(settings.state)
         setupUI()
     }
     
@@ -35,7 +43,7 @@ class LanChatMainPanel(private val project: Project) : JPanel(BorderLayout()) {
         // 创建聊天面板
         chatPanel = ChatPanel(project)
         
-        // 创建联系人列表，传入回调函数
+        // 创建联系人列表
         contactListPanel = ContactListPanel(project) { chatItem ->
             when (chatItem) {
                 is ChatItem.PeerItem -> chatPanel.setCurrentPeer(chatItem.peer)
@@ -51,13 +59,21 @@ class LanChatMainPanel(private val project: Project) : JPanel(BorderLayout()) {
             isOneTouchExpandable = false
         }
         
+        // 迷你聊天栏（最小化状态）
+        miniBar = MiniChatBar(project)
+        
+        // 中间区域：CardLayout 切换完整视图和迷你视图
+        centerPanel = JPanel(CardLayout()).apply {
+            add(splitter, "full")
+            add(miniBar, "mini")
+        }
+        
         // 顶部工具栏
         val toolBar = createToolBar()
         
         add(toolBar, BorderLayout.NORTH)
-        add(splitter, BorderLayout.CENTER)
+        add(centerPanel, BorderLayout.CENTER)
         
-        // 设置最小尺寸
         minimumSize = Dimension(500, 400)
         border = JBUI.Borders.empty()
     }
@@ -67,23 +83,20 @@ class LanChatMainPanel(private val project: Project) : JPanel(BorderLayout()) {
             background = JBColor.PanelBackground
             border = JBUI.Borders.empty(4, 8)
             
-            // 左侧：标题
             val titleLabel = JLabel("LAN Chat").apply {
                 font = font.deriveFont(Font.BOLD, 14f)
             }
             add(titleLabel, BorderLayout.WEST)
             
-            // 右侧：功能按钮
             val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
                 isOpaque = false
                 
-                // 隐藏/显示联系人列表
                 add(createToolBarButton("隐藏联系人", AllIcons.Actions.Collapseall) {
                     toggleContactList()
                 })
                 
-                // 缩小聊天框
-                add(createToolBarButton("缩小聊天框", AllIcons.General.HideToolWindow) {
+                add(createToolBarButton(if (isChatMinimized) "展开聊天" else "最小化聊天", 
+                    if (isChatMinimized) AllIcons.General.ExpandComponent else AllIcons.General.HideToolWindow) {
                     toggleChatMinimize()
                 })
             }
@@ -102,36 +115,95 @@ class LanChatMainPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
     
-    /**
-     * 切换联系人列表显示/隐藏
-     */
     private fun toggleContactList() {
         if (isContactListHidden) {
-            // 显示联系人列表
             splitter.leftComponent = contactListPanel
-            splitter.dividerLocation = lastDividerLocation
+            if (lastDividerLocation > 0) {
+                SwingUtilities.invokeLater { splitter.dividerLocation = lastDividerLocation }
+            }
             isContactListHidden = false
         } else {
-            // 隐藏联系人列表
             lastDividerLocation = splitter.dividerLocation
-            splitter.leftComponent = null
-            splitter.dividerLocation = 0
+            // 使用 setDividerLocation(0.0) 而非设 null，避免 JSplitPane bug
+            SwingUtilities.invokeLater {
+                splitter.leftComponent = null
+                splitter.dividerLocation = 0
+                splitter.resizeWeight = 1.0
+            }
             isContactListHidden = true
         }
     }
     
-    /**
-     * 切换聊天框最小化
-     */
     private fun toggleChatMinimize() {
         if (isChatMinimized) {
-            // 恢复聊天框
-            chatPanel.isVisible = true
+            // 展开聊天
+            (centerPanel.layout as CardLayout).show(centerPanel, "full")
             isChatMinimized = false
         } else {
-            // 最小化聊天框（显示为一个小的提示栏）
-            chatPanel.isVisible = false
+            // 最小化为迷你栏
+            miniBar.refreshUnreadCounts()
+            (centerPanel.layout as CardLayout).show(centerPanel, "mini")
             isChatMinimized = true
+        }
+    }
+    
+    /**
+     * 迷你聊天栏 - 最小化状态下的简洁显示
+     */
+    inner class MiniChatBar(private val project: Project) : JPanel(BorderLayout()) {
+        
+        init {
+            background = JBColor.PanelBackground
+            border = JBUI.Borders.empty(8, 12)
+            
+            // 点击展开
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (e.clickCount == 2) {
+                        toggleChatMinimize()
+                    }
+                }
+            })
+        }
+        
+        fun refreshUnreadCounts() {
+            removeAll()
+            
+            val peerUnread = service.unreadCounts.value.values.sum()
+            val currentChat = chatPanel.getCurrentChatName()
+            
+            val infoPanel = JPanel(BorderLayout()).apply {
+                isOpaque = false
+                
+                // 左侧：当前聊天名
+                val titleLabel = JLabel(currentChat ?: "LAN Chat").apply {
+                    font = font.deriveFont(Font.BOLD, 13f)
+                }
+                add(titleLabel, BorderLayout.WEST)
+                
+                // 右侧：未读总数 + 提示
+                val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 8, 0)).apply {
+                    isOpaque = false
+                    
+                    if (peerUnread > 0) {
+                        add(JLabel("${peerUnread} 条未读").apply {
+                            foreground = JBColor.GRAY
+                            font = font.deriveFont(Font.PLAIN, 11f)
+                        })
+                    }
+                    
+                    add(JLabel("双击展开").apply {
+                        foreground = JBColor(Color(180, 180, 180), Color(100, 100, 100))
+                        font = font.deriveFont(Font.PLAIN, 10f)
+                    })
+                }
+                add(rightPanel, BorderLayout.EAST)
+            }
+            
+            add(infoPanel, BorderLayout.CENTER)
+            
+            revalidate()
+            repaint()
         }
     }
 }

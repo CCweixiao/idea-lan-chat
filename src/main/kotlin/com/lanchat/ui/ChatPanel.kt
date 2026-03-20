@@ -311,6 +311,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         SwingUtilities.invokeLater { cardLayout.show(cardPanel, "empty"); clearChatDisplay() }
     }
 
+    fun getCurrentChatName(): String? = currentPeer?.username ?: currentGroup?.name
+
     // =============== Chat History ===============
 
     private fun loadChatHistory(chatId: String) {
