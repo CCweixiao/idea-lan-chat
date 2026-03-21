@@ -79,7 +79,12 @@ class LanChatService : Disposable {
         }
     }
 
-    init { initialize() }
+    init {
+        // 延迟初始化，避免在 CONFIGURATION_STORE_INITIALIZED 阶段调用需要 COMPONENTS_LOADED 的 API
+        ApplicationManager.getApplication().invokeLater {
+            initialize()
+        }
+    }
 
     private fun initialize() {
         if (isInitialized) return
