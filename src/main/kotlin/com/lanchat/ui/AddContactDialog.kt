@@ -105,7 +105,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
                     BorderFactory.createMatteBorder(1, 0, 0, 0, JBColor(Color(220, 220, 220), Color(60, 60, 60))),
                     JBUI.Borders.emptyTop(8)
                 )
-                add(JLabel("群聊邀请 / 入群申请").apply { font = Font("Microsoft YaHei", Font.BOLD, 13) }, BorderLayout.NORTH)
+                add(JLabel("待处理的群聊邀请").apply { font = Font("Microsoft YaHei", Font.BOLD, 13) }, BorderLayout.NORTH)
                 add(JScrollPane(groupRequestList).apply {
                     border = createListBorder(); preferredSize = Dimension(0, 120)
                 }, BorderLayout.CENTER)

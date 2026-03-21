@@ -6,6 +6,7 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import com.lanchat.LanChatService
+import java.net.URL
 import com.lanchat.network.Group
 import com.lanchat.network.Peer
 import kotlinx.coroutines.*
@@ -14,6 +15,7 @@ import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.geom.Ellipse2D
+import java.awt.geom.RoundRectangle2D
 import javax.swing.*
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
@@ -82,7 +84,12 @@ class ContactListPanel(
 
             val titlePanel = JPanel(BorderLayout()).apply {
                 isOpaque = false
-                add(JLabel("好友列表").apply { font = TITLE_FONT }, BorderLayout.NORTH)
+                val titleLabel = JPanel(FlowLayout(FlowLayout.LEFT, 6, 0)).apply {
+                    isOpaque = false
+                    add(JLabel(createTitleAvatarIcon()))
+                    add(JLabel("好友列表").apply { font = TITLE_FONT })
+                }
+                add(titleLabel, BorderLayout.NORTH)
                 nicknameLabel.apply {
                     text = "${service.username} · ${service.localIp}"
                     font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
@@ -93,7 +100,7 @@ class ContactListPanel(
 
             val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
                 isOpaque = false
-                add(createWechatButton(AllIcons.General.Add, "添加联系人 / 搜索群") { showAddContactDialog() })
+                add(createWechatButton(AllIcons.General.Add, "添加联系人") { showAddContactDialog() })
                 add(createWechatButton(AllIcons.Actions.AddMulticaret, "创建群聊") { showCreateGroupDialog() })
             }
             add(buttonPanel, BorderLayout.EAST)
@@ -525,6 +532,44 @@ class ContactListPanel(
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
             if (color != null) foreground = JBColor(color, color)
             addActionListener { action() }
+        }
+    }
+
+    private fun createTitleAvatarIcon(size: Int = 18): Icon {
+        return object : Icon {
+            override fun paintIcon(c: Component?, g: Graphics?, x: Int, y: Int) {
+                val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+
+                // 渐变紫蓝色背景圆
+                val gradient = java.awt.GradientPaint(
+                    x.toFloat(), y.toFloat(), Color(99, 102, 241),
+                    (x + size).toFloat(), (y + size).toFloat(), Color(139, 92, 246)
+                )
+                g2d.paint = gradient
+                g2d.fill(Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
+
+                // 白色人像
+                g2d.color = Color.WHITE
+                // 头
+                val headSize = (size * 0.35).toInt()
+                val headX = x + (size - headSize) / 2
+                val headY = y + (size * 0.2).toInt()
+                g2d.fill(Ellipse2D.Double(headX.toDouble(), headY.toDouble(), headSize.toDouble(), headSize.toDouble()))
+                // 身体
+                val bodyWidth = (size * 0.7).toInt()
+                val bodyHeight = (size * 0.35).toInt()
+                val bodyX = x + (size - bodyWidth) / 2
+                val bodyY = y + (size * 0.55).toInt()
+                g2d.fill(RoundRectangle2D.Double(
+                    bodyX.toDouble(), bodyY.toDouble(),
+                    bodyWidth.toDouble(), bodyHeight.toDouble(),
+                    bodyWidth.toDouble(), bodyHeight.toDouble()
+                ))
+            }
+            override fun getIconWidth() = size
+            override fun getIconHeight() = size
         }
     }
 
