@@ -254,8 +254,8 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
 
         fun loadHistory() {
             historyListModel.clear()
-            val friendReqs = service.getAllFriendRequests().map { it as Any }
-            val groupReqs = service.getAllGroupRequests().map { it as Any }
+            val friendReqs = service.getAllFriendRequests()
+            val groupReqs = service.getAllGroupRequests()
             val all = (friendReqs + groupReqs).sortedByDescending {
                 when (it) {
                     is FriendRequest -> it.timestamp
