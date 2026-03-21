@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.lanchat.idea-lan-chat</id>
     <name>LAN Chat</name>
-    <vendor email="liuyifei@example.com" url="https://github.com/CCweixiao/idea-lan-chat">liuyifei</vendor>
+    <vendor email="leojie@apache.org" url="https://github.com/CCweixiao/idea-lan-chat">leojie</vendor>
 
     <description><![CDATA[
     <p><b>LAN Chat - Instant messaging tool for local area networks</b></p>
