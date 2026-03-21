@@ -4,28 +4,27 @@
     <vendor email="liuyifei@example.com" url="https://github.com/CCweixiao/idea-lan-chat">liuyifei</vendor>
 
     <description><![CDATA[
-    <h2>🚀 LAN Chat - 局域网即时通讯工具</h2>
-    
-    <p><b>急！需求沟通到一半，企微遭遇外星人攻击，无法发送消息...</b></p>
-    <p><b>幸好我有 LAN Chat！助我工作效率倍增，永不掉线！</b></p>
-    
-    <h3>✨ 核心特性</h3>
+    <p><b>LAN Chat - Instant messaging tool for local area networks</b></p>
+
+    <p>LAN Chat enables developers to chat with colleagues on the same local network without leaving the IDE.</p>
+
+    <h3>Key Features</h3>
     <ul>
-        <li>🌐 <b>自动发现</b> - 自动扫描局域网内在线同事</li>
-        <li>💬 <b>即时通讯</b> - 文本、图片、文件一键发送</li>
-        <li>👥 <b>群组聊天</b> - 创建群聊，团队协作更高效</li>
-        <li>🔒 <b>安全可靠</b> - 局域网内点对点传输，数据不外泄</li>
-        <li>⚡ <b>轻量高效</b> - 极低资源占用，编码聊天两不误</li>
+        <li><b>Auto Discovery</b> - Automatically scan and discover online colleagues in the LAN</li>
+        <li><b>Instant Messaging</b> - Send text, images, and files with one click</li>
+        <li><b>Group Chat</b> - Create groups for efficient team collaboration</li>
+        <li><b>Secure & Reliable</b> - Peer-to-peer transmission within LAN, data never leaves your network</li>
+        <li><b>Lightweight</b> - Minimal resource usage, coding and chatting at the same time</li>
     </ul>
-    
-    <h3>🎯 适用场景</h3>
+
+    <h3>Use Cases</h3>
     <ul>
-        <li>企业内网环境下的团队协作</li>
-        <li>远程办公时的快速沟通</li>
-        <li>临时网络故障时的备用通讯方案</li>
+        <li>Team collaboration in enterprise intranet environments</li>
+        <li>Quick communication during remote work</li>
+        <li>Backup communication solution during temporary network outages</li>
     </ul>
-    
-    <p><i>💡 提示：插件启动后会自动扫描局域网内的在线用户</i></p>
+
+    <p><i>Tip: The plugin will automatically scan for online users in the local network after startup.</i></p>
     ]]></description>
 
     <change-notes><![CDATA[
