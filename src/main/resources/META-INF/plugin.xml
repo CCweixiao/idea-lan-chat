@@ -3,6 +3,8 @@
     <name>LAN Chat</name>
     <vendor email="leojie@apache.org" url="https://github.com/CCweixiao/idea-lan-chat">leojie</vendor>
 
+    <license>Apache 2.0</license>
+
     <description><![CDATA[
     <p><b>LAN Chat - Instant messaging tool for local area networks</b></p>
 
