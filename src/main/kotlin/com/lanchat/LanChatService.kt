@@ -50,6 +50,9 @@ class LanChatService : Disposable {
     private val _blockedPeerIds = MutableStateFlow<Set<String>>(emptySet())
     val blockedPeerIds: StateFlow<Set<String>> = _blockedPeerIds
 
+    private val _pinnedIds = MutableStateFlow<Set<String>>(emptySet())
+    val pinnedIds: StateFlow<Set<String>> = _pinnedIds
+
     private var _currentUser: Peer? = null
     val currentUser: Peer? get() = _currentUser
 
@@ -74,6 +77,15 @@ class LanChatService : Disposable {
     }
 
     companion object {
+        const val FILE_TRANSFER_ASSISTANT_ID = "__file_transfer_assistant__"
+        val FILE_TRANSFER_ASSISTANT = Peer(
+            id = FILE_TRANSFER_ASSISTANT_ID,
+            username = "文件传输助手",
+            ipAddress = "localhost",
+            port = 0,
+            isOnline = true
+        )
+
         fun getInstance(): LanChatService {
             return ApplicationManager.getApplication().getService(LanChatService::class.java)
         }
@@ -112,10 +124,14 @@ class LanChatService : Disposable {
         val settings = LanChatSettings()
         _currentUser = Peer(id = userId, username = _username, ipAddress = _localIp, port = settings.getTcpPort())
 
-        _peers.value = DatabaseManager.loadPeers().mapValues { (_, peer) ->
-            // 启动时给所有好友重置 lastSeen，避免立刻被判定离线
-            if (peer.isOnline) peer.copy(lastSeen = System.currentTimeMillis()) else peer
-        }
+        val loadedPeers = DatabaseManager.loadPeers().mapValues { (_, peer) ->
+            peer.copy(isOnline = false)
+        }.toMutableMap()
+        loadedPeers[FILE_TRANSFER_ASSISTANT_ID] = FILE_TRANSFER_ASSISTANT
+        _peers.value = loadedPeers
+
+        val pinnedRaw = DatabaseManager.getSetting("pinned_ids", "")
+        _pinnedIds.value = if (pinnedRaw.isNotEmpty()) pinnedRaw.split(",").toSet() else emptySet()
         _messages.value = DatabaseManager.loadMessages(userId)
         _groups.value = DatabaseManager.loadGroups()
         _bots.value = DatabaseManager.loadBots()
@@ -183,32 +199,34 @@ class LanChatService : Disposable {
      * 3. 探测失败且超过阈值 → 标记离线
      */
     private fun checkPeerOnlineStatus() {
-        val now = System.currentTimeMillis()
-        val offlineThreshold = 45_000L
         val currentPeers = _peers.value
         if (currentPeers.isEmpty()) return
 
         scope.launch {
-            val results = currentPeers.values.map { peer ->
-                async(Dispatchers.IO) {
-                    val online = try {
-                        networkManager?.probePeer(peer.ipAddress, peer.port, 2000) != null
-                    } catch (_: Exception) { false }
-                    peer.id to online
-                }
-            }.awaitAll()
+            val probeStartTime = System.currentTimeMillis()
+            val results = currentPeers.values
+                .filter { it.id != FILE_TRANSFER_ASSISTANT_ID }
+                .map { peer ->
+                    async(Dispatchers.IO) {
+                        val online = try {
+                            networkManager?.probePeer(peer.ipAddress, peer.port, 2000) != null
+                        } catch (_: Exception) { false }
+                        peer.id to online
+                    }
+                }.awaitAll()
 
             val updated = _peers.value.toMutableMap()
             var changed = false
             results.forEach { (id, probeSuccess) ->
                 val peer = updated[id] ?: return@forEach
                 if (probeSuccess) {
-                    if (!peer.isOnline || (now - peer.lastSeen) > 10_000) {
+                    if (!peer.isOnline || peer.lastSeen < probeStartTime) {
                         updated[id] = peer.copy(isOnline = true, lastSeen = System.currentTimeMillis())
                         changed = true
                     }
                 } else {
-                    if (peer.isOnline && (now - peer.lastSeen) > offlineThreshold) {
+                    // TCP 探测 2 秒超时已失败，若 lastSeen 也在本轮探测之前，直接标记离线
+                    if (peer.isOnline && peer.lastSeen < probeStartTime) {
                         updated[id] = peer.copy(isOnline = false)
                         changed = true
                     }
@@ -216,7 +234,7 @@ class LanChatService : Disposable {
             }
             if (changed) {
                 _peers.value = updated
-                updated.values.forEach { DatabaseManager.savePeer(it) }
+                updated.values.filter { it.id != FILE_TRANSFER_ASSISTANT_ID }.forEach { DatabaseManager.savePeer(it) }
             }
         }
     }
@@ -282,6 +300,7 @@ class LanChatService : Disposable {
             MessageType.FRIEND_RESPONSE -> handleFriendResponse(message)
             MessageType.GROUP_INVITE -> handleGroupInvite(message)
             MessageType.GROUP_INVITE_RESPONSE -> handleGroupInviteResponse(message)
+            MessageType.PROFILE_UPDATE -> handleProfileUpdate(message)
             MessageType.MESSAGE_READ_ACK -> {
                 // 已关闭群消息回执功能：忽略回执消息
             }
@@ -312,28 +331,12 @@ class LanChatService : Disposable {
     }
 
     fun markAsRead(chatId: String) {
-        val userId = _currentUser?.id ?: return
-        val userName = _username
-        val current = _unreadCounts.value.toMutableMap()
-        if (current.containsKey(chatId) && current[chatId]!! > 0) {
-            current[chatId] = 0
-            _unreadCounts.value = current
-            DatabaseManager.markMessagesAsRead(chatId, userId, userName)
+        // 记录当前时间为该聊天的最后阅读时间
+        DatabaseManager.updateLastReadAt(chatId, System.currentTimeMillis())
 
-            // 更新内存中的消息状态
-            val msgs = _messages.value.toMutableMap()
-            msgs[chatId]?.forEach { msg ->
-                if (!msg.isSentByMe(userId)) {
-                    val index = msgs[chatId]?.indexOf(msg)
-                    if (index != null && index >= 0) {
-                        msgs[chatId]?.set(index, msg.copy(isRead = true))
-                    }
-                }
-            }
-            _messages.value = msgs
-            
-            // 已关闭群消息回执功能：不再广播已读回执
-        }
+        val current = _unreadCounts.value.toMutableMap()
+        current.remove(chatId)
+        _unreadCounts.value = current
     }
 
     /**
@@ -413,18 +416,15 @@ class LanChatService : Disposable {
     private fun addPeer(peer: Peer) {
         val currentPeers = _peers.value.toMutableMap()
         val existing = currentPeers[peer.id]
-        currentPeers[peer.id] = peer.copy(
+        val updatedPeer = peer.copy(
             isOnline = true,
             lastSeen = System.currentTimeMillis(),
             // 保留已有的签名等信息
             signature = existing?.signature ?: peer.signature
         )
+        currentPeers[peer.id] = updatedPeer
         _peers.value = currentPeers
-        DatabaseManager.savePeer(peer.copy(
-            isOnline = true,
-            lastSeen = System.currentTimeMillis(),
-            signature = existing?.signature ?: peer.signature
-        ))
+        DatabaseManager.savePeer(updatedPeer)
     }
 
     /**
@@ -465,6 +465,7 @@ class LanChatService : Disposable {
     }
 
     fun removePeer(peerId: String) {
+        if (peerId == FILE_TRANSFER_ASSISTANT_ID) return
         val m = _peers.value.toMutableMap(); m.remove(peerId); _peers.value = m
         DatabaseManager.deletePeer(peerId)
 
@@ -489,6 +490,27 @@ class LanChatService : Disposable {
 
     fun searchPeersByIp(ip: String): List<Peer> =
         _peers.value.values.filter { it.ipAddress.contains(ip) }
+
+    // =============== Pinned Items ===============
+
+    fun isPinned(id: String): Boolean = _pinnedIds.value.contains(id)
+
+    fun togglePin(id: String) {
+        val mutable = _pinnedIds.value.toMutableSet()
+        if (mutable.contains(id)) mutable.remove(id) else mutable.add(id)
+        _pinnedIds.value = mutable
+        DatabaseManager.saveSetting("pinned_ids", mutable.joinToString(","))
+    }
+
+    // =============== File Transfer Assistant ===============
+
+    fun isFileTransferAssistant(peerId: String): Boolean = peerId == FILE_TRANSFER_ASSISTANT_ID
+
+    fun sendToFileTransferAssistant(message: Message) {
+        val localMsg = message.copy(fileData = null)
+        addMessageToHistory(localMsg)
+        notifyMessageListeners(localMsg)
+    }
 
     /**
      * 探测指定IP:端口的用户信息
@@ -520,25 +542,51 @@ class LanChatService : Disposable {
     }
 
     fun sendImageMessage(receiverId: String, imagePath: String) {
+        val file = java.io.File(imagePath)
+        val bytes = try { file.readBytes() } catch (_: Exception) { return }
+        val localCopy = saveToLanChatDir(file)
         val msg = Message(
             type = MessageType.IMAGE, senderId = _currentUser?.id ?: return,
-            receiverId = receiverId, content = imagePath
+            receiverId = receiverId, content = localCopy.absolutePath,
+            fileName = file.name, fileSize = file.length(), fileData = bytes
         )
         sendPeerMessage(msg, receiverId)
     }
 
     fun sendFileMessage(receiverId: String, filePath: String, fileName: String) {
+        val file = java.io.File(filePath)
+        val bytes = try { file.readBytes() } catch (_: Exception) { return }
+        val localCopy = saveToLanChatDir(file)
         val msg = Message(
             type = MessageType.FILE, senderId = _currentUser?.id ?: return,
-            receiverId = receiverId, content = filePath, fileName = fileName
+            receiverId = receiverId, content = localCopy.absolutePath,
+            fileName = fileName, fileSize = file.length(), fileData = bytes
         )
         sendPeerMessage(msg, receiverId)
     }
 
+    private fun saveToLanChatDir(srcFile: java.io.File): java.io.File {
+        val dir = com.lanchat.network.NetworkManager.getLanChatDir()
+        var target = java.io.File(dir, srcFile.name)
+        if (target.exists() && target.absolutePath != srcFile.absolutePath) {
+            val ext = srcFile.extension
+            val base = srcFile.nameWithoutExtension
+            target = java.io.File(dir, "${base}_${System.currentTimeMillis()}.$ext")
+        }
+        if (target.absolutePath != srcFile.absolutePath) {
+            srcFile.copyTo(target, overwrite = true)
+        }
+        return target
+    }
+
     private fun sendPeerMessage(message: Message, peerId: String) {
+        if (peerId == FILE_TRANSFER_ASSISTANT_ID) {
+            addMessageToHistory(message.copy(fileData = null))
+            return
+        }
         scope.launch {
             val target = resolvePeerTarget(peerId)
-            addMessageToHistory(message)
+            addMessageToHistory(message.copy(fileData = null))
 
             if (target != null) {
                 val isLoopback = target.first == _localIp || target.first == "127.0.0.1"
@@ -582,6 +630,40 @@ class LanChatService : Disposable {
         }
     }
 
+    fun sendGroupImageMessage(groupId: String, imagePath: String) {
+        val senderId = _currentUser?.id ?: return
+        val file = java.io.File(imagePath)
+        val bytes = try { file.readBytes() } catch (_: Exception) { return }
+        val localCopy = saveToLanChatDir(file)
+        val message = Message(
+            type = MessageType.IMAGE, senderId = senderId, receiverId = groupId,
+            content = localCopy.absolutePath, fileName = file.name,
+            fileSize = file.length(), fileData = bytes, groupId = groupId, senderName = _username
+        )
+        scope.launch {
+            val targets = getGroupMemberTargets(groupId)
+            if (targets.isNotEmpty()) networkManager?.sendToMultiple(message, targets)
+            addMessageToHistory(message.copy(fileData = null))
+        }
+    }
+
+    fun sendGroupFileMessage(groupId: String, filePath: String, fileName: String) {
+        val senderId = _currentUser?.id ?: return
+        val file = java.io.File(filePath)
+        val bytes = try { file.readBytes() } catch (_: Exception) { return }
+        val localCopy = saveToLanChatDir(file)
+        val message = Message(
+            type = MessageType.FILE, senderId = senderId, receiverId = groupId,
+            content = localCopy.absolutePath, fileName = fileName,
+            fileSize = file.length(), fileData = bytes, groupId = groupId, senderName = _username
+        )
+        scope.launch {
+            val targets = getGroupMemberTargets(groupId)
+            if (targets.isNotEmpty()) networkManager?.sendToMultiple(message, targets)
+            addMessageToHistory(message.copy(fileData = null))
+        }
+    }
+
     fun sendMentionMessage(
         receiverId: String, content: String,
         mentionedUserIds: List<String> = emptyList(),
@@ -614,12 +696,20 @@ class LanChatService : Disposable {
         }
         val currentMessages = _messages.value.toMutableMap()
         val chatMessages = currentMessages.getOrPut(chatId) { mutableListOf() }
+
+        // 检查消息是否已存在（通过 ID 去重）
+        if (chatMessages.any { it.id == message.id }) {
+            return // 消息已存在，不再重复添加
+        }
+
         chatMessages.add(message)
         _messages.value = currentMessages
         DatabaseManager.saveMessage(message)
     }
 
     fun getChatHistory(chatId: String): List<Message> = _messages.value[chatId] ?: emptyList()
+
+    fun getLastReadAt(chatId: String): Long = DatabaseManager.getLastReadAt(chatId)
 
     /**
      * 清空指定聊天的聊天记录
@@ -943,6 +1033,15 @@ class LanChatService : Disposable {
         val group = _groups.value[groupId] ?: return emptyList()
         return group.memberIds.mapNotNull { memberId ->
             _peers.value[memberId] ?: if (memberId == _currentUser?.id) _currentUser else null
+        }
+    }
+
+    fun getGroupOnlineCount(groupId: String): Int {
+        val group = _groups.value[groupId] ?: return 0
+        val myId = _currentUser?.id
+        return group.memberIds.count { memberId ->
+            if (memberId == myId) true
+            else _peers.value[memberId]?.isOnline == true
         }
     }
 
@@ -1374,6 +1473,39 @@ class LanChatService : Disposable {
         }
     }
 
+    // =============== Profile Update ===============
+
+    private fun handleProfileUpdate(message: Message) {
+        val senderId = message.senderId
+        val newUsername = message.senderName ?: message.content
+
+        var avatarLocalPath: String? = null
+        if (message.fileName != null) {
+            val receivedFile = java.io.File(message.content)
+            if (receivedFile.exists() && receivedFile.length() > 0) {
+                val avatarDir = java.io.File(System.getProperty("user.home"), ".lanchat/avatars")
+                if (!avatarDir.exists()) avatarDir.mkdirs()
+                val ext = message.fileName.substringAfterLast('.', "png")
+                val target = java.io.File(avatarDir, "${senderId}.$ext")
+                try {
+                    receivedFile.copyTo(target, overwrite = true)
+                    receivedFile.delete()
+                    avatarLocalPath = target.absolutePath
+                } catch (_: Exception) { }
+            }
+        }
+
+        val peers = _peers.value.toMutableMap()
+        val existing = peers[senderId] ?: return
+        val updated = existing.copy(
+            username = newUsername,
+            avatar = avatarLocalPath ?: existing.avatar
+        )
+        peers[senderId] = updated
+        _peers.value = peers
+        DatabaseManager.savePeer(updated)
+    }
+
     // =============== User Settings ===============
 
     fun updateUsername(newUsername: String) {
@@ -1693,6 +1825,32 @@ class LanChatService : Disposable {
         _userAvatar = avatarPath
         _currentUser = _currentUser?.copy(avatar = avatarPath)
         DatabaseManager.saveSetting("userAvatar", avatarPath)
+    }
+
+    fun broadcastProfileUpdate() {
+        val senderId = _currentUser?.id ?: return
+        val avatarFile = _userAvatar?.let { java.io.File(it) }
+        val avatarBytes = try { avatarFile?.takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+        val avatarFileName = avatarFile?.name
+
+        val msg = Message(
+            type = MessageType.PROFILE_UPDATE,
+            senderId = senderId,
+            receiverId = "",
+            content = _username,
+            senderName = _username,
+            fileName = avatarFileName,
+            fileSize = avatarBytes?.size?.toLong(),
+            fileData = avatarBytes
+        )
+        scope.launch {
+            val targets = _peers.value.values
+                .filter { it.id != senderId && it.id != FILE_TRANSFER_ASSISTANT_ID && it.isOnline }
+                .map { Pair(it.ipAddress, it.port) }
+            if (targets.isNotEmpty()) {
+                networkManager?.sendToMultiple(msg, targets)
+            }
+        }
     }
 
     override fun dispose() {

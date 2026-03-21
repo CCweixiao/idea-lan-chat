@@ -19,9 +19,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.awt.*
+import java.awt.datatransfer.DataFlavor
 import java.awt.event.ActionEvent
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
+import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -41,11 +43,18 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val messagePanel: JPanel
     private val messageScrollPane: JBScrollPane
-    private val inputArea = JTextArea(3, 20)
+    private val inputArea = object : JTextArea(3, 20) {
+        override fun paste() {
+            if (tryPasteImage()) return
+            super.paste()
+        }
+    }
     private var currentPeer: Peer? = null
     private var currentGroup: Group? = null
     private var scrollToBottomButton: JButton? = null
     private lateinit var sendButton: JButton
+    private var pendingNewMsgCount = 0
+    private var lastSendTime = 0L
 
     private val titleLabel = JLabel()
     private val statusLabel = JLabel()
@@ -60,6 +69,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     companion object {
         private const val MAX_BUBBLE_WIDTH = 300
+        private const val SEND_RATE_LIMIT_MS = 500L
+        private const val MAX_IMAGE_SIZE = 10L * 1024 * 1024
+        private const val MAX_FILE_SIZE = 100L * 1024 * 1024
         private val MSG_FONT = Font("Microsoft YaHei", Font.PLAIN, 14)
         private val NAME_FONT = Font("Microsoft YaHei", Font.PLAIN, 11)
         private val TIME_FONT = Font("Microsoft YaHei", Font.PLAIN, 10)
@@ -138,24 +150,43 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val fm = g2d.fontMetrics
                 g2d.drawString(text, (width - fm.stringWidth(text)) / 2, (height + fm.ascent - fm.descent) / 2)
             }
+            override fun getPreferredSize(): Dimension {
+                val fm = getFontMetrics(font)
+                val w = fm.stringWidth(text) + 28
+                return Dimension(maxOf(w, 110), 28)
+            }
         }.apply {
             background = JBColor(Color(0, 0, 0, 140), Color(200, 200, 200, 160))
             foreground = JBColor(Color.WHITE, Color(40, 40, 40))
             font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
             isBorderPainted = false; isFocusPainted = false; isContentAreaFilled = false; isOpaque = false
             cursor = Cursor(Cursor.HAND_CURSOR)
-            preferredSize = Dimension(110, 28)
             isVisible = false
-            addActionListener { scrollToBottom() }
+            addActionListener {
+                pendingNewMsgCount = 0
+                updateScrollButtonText()
+                scrollToBottom()
+            }
         }
 
         messageScrollPane.verticalScrollBar.addAdjustmentListener { e ->
             val sb = e.adjustable
-            val atBottom = sb.value + sb.visibleAmount >= sb.maximum - 50
-            scrollToBottomButton?.isVisible = !atBottom && sb.maximum > sb.visibleAmount * 2
+            val atBottom = sb.value + sb.visibleAmount >= sb.maximum - 30
+            val btn = scrollToBottomButton ?: return@addAdjustmentListener
+            val shouldShow = !atBottom
+            if (btn.isVisible != shouldShow) {
+                btn.isVisible = shouldShow
+                btn.parent?.let { it.doLayout(); it.repaint() }
+            }
+            if (atBottom && pendingNewMsgCount > 0) {
+                pendingNewMsgCount = 0
+                updateScrollButtonText()
+            }
         }
 
-        val messageArea = JLayeredPane().apply {
+        val messageArea = object : JPanel() {
+            override fun isOptimizedDrawingEnabled() = false
+        }.apply {
             layout = object : LayoutManager {
                 override fun addLayoutComponent(name: String?, comp: Component?) {}
                 override fun removeLayoutComponent(comp: Component?) {}
@@ -168,8 +199,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     btn.setBounds((parent.width - bw) / 2, parent.height - bh - 12, bw, bh)
                 }
             }
-            add(messageScrollPane, JLayeredPane.DEFAULT_LAYER)
-            add(scrollToBottomButton, JLayeredPane.PALETTE_LAYER)
+            add(scrollToBottomButton)
+            add(messageScrollPane)
         }
 
         chatCard.apply {
@@ -215,8 +246,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         headerButtonPanel.removeAll()
         if (currentGroup != null) {
             val group = currentGroup!!
+            val online = service.getGroupOnlineCount(group.id)
             val numberText = if (group.groupNumber.isNotEmpty()) " · ${group.groupNumber}" else ""
-            headerButtonPanel.add(object : JButton("成员(${group.getMemberCount()})$numberText") {
+            headerButtonPanel.add(object : JButton("成员(${online}/${group.getMemberCount()})$numberText") {
                 override fun paintComponent(g: Graphics) {
                     val g2d = g as Graphics2D
                     g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
@@ -242,12 +274,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun updateToolbar() {
         toolbarPanel.removeAll()
         toolbarPanel.add(createToolbarIcon(AllIcons.General.Web, "发送图片") { sendImage() })
+        toolbarPanel.add(createToolbarIcon(AllIcons.General.InlineAdd, "粘贴剪贴板图片") { handlePasteFromToolbar() })
         toolbarPanel.add(createToolbarIcon(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
         if (currentGroup != null) {
             toolbarPanel.add(Box.createHorizontalStrut(4))
             toolbarPanel.add(createToolbarIcon(AllIcons.Actions.GroupByModule, "@成员") { showMentionDialog() })
         }
-        // 添加存储空间管理按钮
         toolbarPanel.add(Box.createHorizontalStrut(8))
         toolbarPanel.add(createToolbarIcon(AllIcons.General.Settings, "存储空间管理") { showStorageManager() })
         toolbarPanel.revalidate(); toolbarPanel.repaint()
@@ -268,6 +300,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             )
             toolbarPanel.isOpaque = false; toolbarPanel.border = JBUI.Borders.emptyBottom(4)
             toolbarPanel.add(createToolbarIcon(AllIcons.General.Web, "发送图片") { sendImage() })
+            toolbarPanel.add(createToolbarIcon(AllIcons.General.InlineAdd, "粘贴剪贴板图片") { handlePasteFromToolbar() })
             toolbarPanel.add(createToolbarIcon(AllIcons.FileTypes.Any_type, "发送文件") { sendFile() })
             toolbarPanel.add(createToolbarIcon(AllIcons.Actions.Preview, "查看聊天记录") { showChatHistory() })
             add(toolbarPanel, BorderLayout.NORTH)
@@ -333,6 +366,16 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             override fun actionPerformed(e: ActionEvent?) { inputArea.append("\n") }
         })
 
+        inputArea.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_V && (e.isMetaDown || e.isControlDown)) {
+                    if (tryPasteImage()) {
+                        e.consume()
+                    }
+                }
+            }
+        })
+
         inputArea.document.addDocumentListener(object : javax.swing.event.DocumentListener {
             override fun insertUpdate(e: javax.swing.event.DocumentEvent) {
                 if (suppressAtDetection || currentGroup == null) return
@@ -351,6 +394,45 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             override fun removeUpdate(e: javax.swing.event.DocumentEvent) {}
             override fun changedUpdate(e: javax.swing.event.DocumentEvent) {}
         })
+
+        setupDragAndDrop()
+    }
+
+    private fun setupDragAndDrop() {
+        val handler = object : TransferHandler() {
+            override fun canImport(support: TransferSupport): Boolean {
+                return support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
+                    || support.isDataFlavorSupported(DataFlavor.imageFlavor)
+            }
+
+            override fun importData(support: TransferSupport): Boolean {
+                if (!canImport(support)) return false
+                try {
+                    if (support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                        @Suppress("UNCHECKED_CAST")
+                        val files = support.transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>
+                        files.firstOrNull()?.let { file ->
+                            val ext = file.extension.lowercase()
+                            if (ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")) {
+                                val img = ImageIO.read(file)
+                                if (img != null) showImagePreviewAndSend(img, file)
+                                else { showToast("无法读取图片"); return false }
+                            } else {
+                                if (file.length() > MAX_FILE_SIZE) { showToast("文件不能超过 100MB"); return false }
+                                sendFileDirectly(file)
+                            }
+                        }
+                        return true
+                    }
+                    if (support.isDataFlavorSupported(DataFlavor.imageFlavor)) {
+                        val image = support.transferable.getTransferData(DataFlavor.imageFlavor) as? Image
+                        if (image != null) { showImagePreviewAndSend(image); return true }
+                    }
+                } catch (ex: Exception) { showToast("拖入失败: ${ex.message}") }
+                return false
+            }
+        }
+        inputArea.transferHandler = handler
     }
 
     // =============== Public API ===============
@@ -359,15 +441,22 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         currentPeer = peer; currentGroup = null
         SwingUtilities.invokeLater {
             if (peer != null) {
+                val isAssistant = service.isFileTransferAssistant(peer.id)
+                val lastReadAt = service.getLastReadAt(peer.id)
                 service.setCurrentChatId(peer.id)
                 titleLabel.text = peer.username
-                val onlineText = if (peer.isOnline) "在线 · ${peer.ipAddress}" else "离线 · ${peer.ipAddress}"
-                statusLabel.text = "$onlineText${encryptionTag()}"
-                statusLabel.foreground = if (peer.isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
+                if (isAssistant) {
+                    statusLabel.text = "本地文件存储"
+                    statusLabel.foreground = ThemeManager.onlineColor
+                } else {
+                    val onlineText = if (peer.isOnline) "在线 · ${peer.ipAddress}" else "离线 · ${peer.ipAddress}"
+                    statusLabel.text = "$onlineText${encryptionTag()}"
+                    statusLabel.foreground = if (peer.isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
+                }
                 updateHeaderButtons(); updateToolbar()
                 inputArea.isEditable = true; sendButton.isEnabled = true
                 inputArea.background = ThemeManager.panelBackground; inputArea.toolTipText = null
-                cardLayout.show(cardPanel, "chat"); loadChatHistory(peer.id)
+                cardLayout.show(cardPanel, "chat"); loadChatHistory(peer.id, lastReadAt)
             } else {
                 service.setCurrentChatId(null)
                 cardLayout.show(cardPanel, "empty")
@@ -379,13 +468,13 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         currentGroup = group; currentPeer = null
         SwingUtilities.invokeLater {
             if (group != null) {
+                val lastReadAt = service.getLastReadAt(group.id)
                 service.setCurrentChatId(group.id)
                 titleLabel.text = group.name
-                val muteInfo = if (group.globalMute) "（全员禁言中）" else ""
-                statusLabel.text = "${group.getMemberCount()} 位成员$muteInfo${encryptionTag()}"; statusLabel.foreground = JBColor.GRAY
+                statusLabel.text = groupStatusText(group); statusLabel.foreground = JBColor.GRAY
                 updateHeaderButtons(); updateToolbar()
                 updateMuteStatus(group)
-                cardLayout.show(cardPanel, "chat"); loadChatHistory(group.id)
+                cardLayout.show(cardPanel, "chat"); loadChatHistory(group.id, lastReadAt)
             } else {
                 service.setCurrentChatId(null)
                 cardLayout.show(cardPanel, "empty")
@@ -403,9 +492,10 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     // =============== Chat History ===============
 
-    private fun loadChatHistory(chatId: String) {
+    private fun loadChatHistory(chatId: String, lastReadAt: Long = 0L) {
         messagePanel.removeAll(); lastDisplayedTimestamp = 0
         val messages = service.getChatHistory(chatId)
+        var unreadDivider: JPanel? = null
         if (messages.isEmpty()) {
             messagePanel.add(JPanel(GridBagLayout()).apply {
                 isOpaque = false
@@ -415,15 +505,79 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 })
             })
         } else {
+            val myId = service.currentUser?.id ?: ""
+            val firstUnreadIdx = if (lastReadAt > 0) {
+                messages.indexOfFirst { it.timestamp > lastReadAt && it.senderId != myId }
+            } else -1
+            pendingNewMsgCount = if (firstUnreadIdx > 0) {
+                messages.subList(firstUnreadIdx, messages.size).count { it.senderId != myId }
+            } else 0
+            updateScrollButtonText()
             var prevTs = 0L
-            for (msg in messages) {
+            for ((idx, msg) in messages.withIndex()) {
                 addTimeSeparatorIfNeeded(msg.timestamp, prevTs); prevTs = msg.timestamp
+                if (unreadDivider == null && firstUnreadIdx in 1..idx && idx == firstUnreadIdx) {
+                    unreadDivider = createUnreadDivider()
+                    messagePanel.add(unreadDivider)
+                }
                 messagePanel.add(createMessageRow(msg))
             }
             lastDisplayedTimestamp = prevTs
         }
         messagePanel.add(Box.createVerticalGlue())
-        messagePanel.revalidate(); messagePanel.repaint(); scrollToBottom()
+        messagePanel.revalidate(); messagePanel.repaint()
+        val divider = unreadDivider
+        if (divider != null) {
+            scrollToDivider(divider)
+            if (pendingNewMsgCount > 0) {
+                SwingUtilities.invokeLater {
+                    val btn = scrollToBottomButton ?: return@invokeLater
+                    btn.isVisible = true
+                    btn.parent?.let { it.doLayout(); it.repaint() }
+                }
+            }
+        } else {
+            scrollToBottom()
+        }
+    }
+
+    private fun createUnreadDivider(): JPanel {
+        return object : JPanel(BorderLayout()) {
+            override fun getMaximumSize() = Dimension(Int.MAX_VALUE, preferredSize.height)
+            override fun paintComponent(g: Graphics) {
+                super.paintComponent(g)
+                val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val y = height / 2
+                val labelWidth = 90
+                val left = (width - labelWidth) / 2
+                g2d.color = JBColor(Color(230, 76, 76, 80), Color(200, 80, 80, 100))
+                g2d.stroke = BasicStroke(1f)
+                g2d.drawLine(24, y, left - 8, y)
+                g2d.drawLine(left + labelWidth + 8, y, width - 24, y)
+            }
+        }.apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(8, 0)
+            preferredSize = Dimension(0, 32)
+            add(JPanel(FlowLayout(FlowLayout.CENTER, 0, 0)).apply {
+                isOpaque = false
+                add(object : JLabel("  以下是新消息  ") {
+                    override fun paintComponent(g: Graphics) {
+                        val g2d = g as Graphics2D
+                        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                        g2d.color = JBColor(Color(230, 76, 76, 30), Color(200, 80, 80, 40))
+                        g2d.fillRoundRect(0, 0, width, height, 12, 12)
+                        super.paintComponent(g)
+                    }
+                }.apply {
+                    font = Font("Microsoft YaHei", Font.PLAIN, 11)
+                    foreground = JBColor(Color(220, 70, 70), Color(220, 100, 100))
+                    horizontalAlignment = SwingConstants.CENTER
+                    isOpaque = false
+                })
+            }, BorderLayout.CENTER)
+        }
     }
 
     /**
@@ -555,7 +709,17 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun sendMessage() {
         val text = inputArea.text.trim()
-        if (text.isEmpty()) { inputArea.requestFocus(); return }
+        if (text.isEmpty()) {
+            showToast("不能发送空消息")
+            inputArea.requestFocus(); return
+        }
+
+        val now = System.currentTimeMillis()
+        if (now - lastSendTime < SEND_RATE_LIMIT_MS) {
+            showToast("发送过于频繁，请稍后再试")
+            return
+        }
+        lastSendTime = now
 
         currentGroup?.let { group ->
             if (service.isUserMuted(group.id)) {
@@ -570,6 +734,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 content = text, senderName = service.username, groupId = group.id, mentionedUserIds = mIds, mentionAll = mAll)); return
         }
         currentPeer?.let { peer ->
+            if (!service.isFileTransferAssistant(peer.id) && !peer.isOnline) {
+                val choice = JOptionPane.showConfirmDialog(this,
+                    "对方当前不在线，消息将会丢失。\n确定要发送吗？", "离线提示",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                if (choice != JOptionPane.YES_OPTION) return
+            }
             service.sendTextMessage(peer.id, text); inputArea.text = ""
             addMessageToPanel(Message(type = MessageType.TEXT, senderId = service.currentUser?.id ?: "",
                 receiverId = peer.id, content = text, senderName = service.username))
@@ -577,19 +747,190 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun sendImage() {
-        val fc = JFileChooser().apply { fileFilter = javax.swing.filechooser.FileNameExtensionFilter("图片文件", "jpg", "jpeg", "png", "gif") }
-        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            currentPeer?.let { service.sendImageMessage(it.id, fc.selectedFile.absolutePath); addImageMessageToPanel(fc.selectedFile) }
-                ?: JOptionPane.showMessageDialog(this, "请先选择一个联系人", "提示", JOptionPane.WARNING_MESSAGE)
+        val fc = JFileChooser().apply {
+            fileFilter = javax.swing.filechooser.FileNameExtensionFilter("图片文件", "jpg", "jpeg", "png", "gif", "bmp", "webp")
         }
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return
+        val file = fc.selectedFile
+        if (file.length() > MAX_IMAGE_SIZE) {
+            showToast("图片不能超过 10MB"); return
+        }
+        currentGroup?.let { group ->
+            service.sendGroupImageMessage(group.id, file.absolutePath)
+            addMessageToPanel(Message(type = MessageType.IMAGE, senderId = service.currentUser?.id ?: "",
+                receiverId = group.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), groupId = group.id, senderName = service.username))
+            return
+        }
+        currentPeer?.let { peer ->
+            if (!service.isFileTransferAssistant(peer.id) && !peer.isOnline) {
+                val c = JOptionPane.showConfirmDialog(this, "对方当前不在线，文件将无法送达。\n确定要发送吗？",
+                    "离线提示", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                if (c != JOptionPane.YES_OPTION) return
+            }
+            service.sendImageMessage(peer.id, file.absolutePath)
+            addMessageToPanel(Message(type = MessageType.IMAGE, senderId = service.currentUser?.id ?: "",
+                receiverId = peer.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), senderName = service.username))
+        } ?: showToast("请先选择联系人或群聊")
     }
 
     private fun sendFile() {
         val fc = JFileChooser()
-        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            currentPeer?.let { service.sendFileMessage(it.id, fc.selectedFile.absolutePath, fc.selectedFile.name); addFileMessageToPanel(fc.selectedFile) }
-                ?: JOptionPane.showMessageDialog(this, "请先选择一个联系人", "提示", JOptionPane.WARNING_MESSAGE)
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return
+        val file = fc.selectedFile
+        if (file.length() > MAX_FILE_SIZE) {
+            showToast("文件不能超过 100MB"); return
         }
+        currentGroup?.let { group ->
+            service.sendGroupFileMessage(group.id, file.absolutePath, file.name)
+            addMessageToPanel(Message(type = MessageType.FILE, senderId = service.currentUser?.id ?: "",
+                receiverId = group.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), groupId = group.id, senderName = service.username))
+            return
+        }
+        currentPeer?.let { peer ->
+            if (!service.isFileTransferAssistant(peer.id) && !peer.isOnline) {
+                val c = JOptionPane.showConfirmDialog(this, "对方当前不在线，文件将无法送达。\n确定要发送吗？",
+                    "离线提示", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                if (c != JOptionPane.YES_OPTION) return
+            }
+            service.sendFileMessage(peer.id, file.absolutePath, file.name)
+            addMessageToPanel(Message(type = MessageType.FILE, senderId = service.currentUser?.id ?: "",
+                receiverId = peer.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), senderName = service.username))
+        } ?: showToast("请先选择联系人或群聊")
+    }
+
+    private fun tryPasteImage(): Boolean {
+        val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+        try {
+            val flavors = clipboard.availableDataFlavors
+
+            val hasImage = flavors.any { it == DataFlavor.imageFlavor || it.mimeType.startsWith("image/") }
+            if (hasImage) {
+                val image = try { clipboard.getData(DataFlavor.imageFlavor) as? Image } catch (_: Exception) { null }
+                if (image != null) { showImagePreviewAndSend(image); return true }
+            }
+
+            val hasFiles = flavors.any { it.isFlavorJavaFileListType }
+            if (hasFiles) {
+                @Suppress("UNCHECKED_CAST")
+                val files = try { clipboard.getData(DataFlavor.javaFileListFlavor) as? List<File> } catch (_: Exception) { null }
+                val file = files?.firstOrNull()
+                if (file != null) {
+                    val ext = file.extension.lowercase()
+                    if (ext in listOf("jpg", "jpeg", "png", "gif", "bmp", "webp")) {
+                        val img = ImageIO.read(file)
+                        if (img != null) { showImagePreviewAndSend(img, file); return true }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    private fun handlePasteFromToolbar() {
+        if (!tryPasteImage()) {
+            showToast("剪贴板中没有图片")
+        }
+    }
+
+    private fun showImagePreviewAndSend(image: Image, sourceFile: File? = null) {
+        val bi = toBufferedImage(image)
+        if (bi == null) { showToast("无法读取剪贴板图片"); return }
+
+        val maxPrev = 300
+        val scale = minOf(maxPrev.toDouble() / bi.width, maxPrev.toDouble() / bi.height, 1.0)
+        val pw = (bi.width * scale).toInt(); val ph = (bi.height * scale).toInt()
+        val preview = bi.getScaledInstance(pw, ph, Image.SCALE_SMOOTH)
+
+        val previewPanel = JPanel(BorderLayout(0, 8)).apply {
+            add(JLabel(ImageIcon(preview)).apply {
+                horizontalAlignment = SwingConstants.CENTER
+                border = BorderFactory.createLineBorder(JBColor(Color(200, 200, 200), Color(80, 80, 80)))
+            }, BorderLayout.CENTER)
+            val sizeText = "${bi.width} × ${bi.height} 像素"
+            add(JLabel(sizeText).apply {
+                foreground = JBColor.GRAY
+                font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                horizontalAlignment = SwingConstants.CENTER
+            }, BorderLayout.SOUTH)
+        }
+
+        val result = JOptionPane.showConfirmDialog(
+            this, previewPanel, "发送图片", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE
+        )
+        if (result != JOptionPane.OK_OPTION) return
+
+        if (sourceFile != null && sourceFile.exists()) {
+            if (sourceFile.length() > MAX_IMAGE_SIZE) { showToast("图片不能超过 10MB"); return }
+            sendImageFile(sourceFile)
+        } else {
+            val tempFile = File(com.lanchat.network.NetworkManager.getLanChatDir(),
+                "clipboard_${System.currentTimeMillis()}.png")
+            ImageIO.write(bi, "png", tempFile)
+            if (tempFile.length() > MAX_IMAGE_SIZE) {
+                tempFile.delete(); showToast("图片不能超过 10MB"); return
+            }
+            sendImageFile(tempFile)
+        }
+    }
+
+    private fun toBufferedImage(image: Image): BufferedImage? {
+        if (image is BufferedImage) return image
+        val tracker = MediaTracker(this)
+        tracker.addImage(image, 0)
+        try { tracker.waitForAll(3000) } catch (_: InterruptedException) {}
+        val w = image.getWidth(null); val h = image.getHeight(null)
+        if (w <= 0 || h <= 0) return null
+        return BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB).apply {
+            createGraphics().let { g ->
+                g.drawImage(image, 0, 0, null); g.dispose()
+            }
+        }
+    }
+
+    private fun sendImageFile(file: File) {
+        currentGroup?.let { group ->
+            service.sendGroupImageMessage(group.id, file.absolutePath)
+            addMessageToPanel(Message(type = MessageType.IMAGE, senderId = service.currentUser?.id ?: "",
+                receiverId = group.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), groupId = group.id, senderName = service.username))
+            return
+        }
+        currentPeer?.let { peer ->
+            if (!service.isFileTransferAssistant(peer.id) && !peer.isOnline) {
+                val c = JOptionPane.showConfirmDialog(this, "对方当前不在线，文件将无法送达。\n确定要发送吗？",
+                    "离线提示", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                if (c != JOptionPane.YES_OPTION) return
+            }
+            service.sendImageMessage(peer.id, file.absolutePath)
+            addMessageToPanel(Message(type = MessageType.IMAGE, senderId = service.currentUser?.id ?: "",
+                receiverId = peer.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), senderName = service.username))
+        } ?: showToast("请先选择联系人或群聊")
+    }
+
+    private fun sendFileDirectly(file: File) {
+        currentGroup?.let { group ->
+            service.sendGroupFileMessage(group.id, file.absolutePath, file.name)
+            addMessageToPanel(Message(type = MessageType.FILE, senderId = service.currentUser?.id ?: "",
+                receiverId = group.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), groupId = group.id, senderName = service.username))
+            return
+        }
+        currentPeer?.let { peer ->
+            if (!service.isFileTransferAssistant(peer.id) && !peer.isOnline) {
+                val c = JOptionPane.showConfirmDialog(this, "对方当前不在线，文件将无法送达。\n确定要发送吗？",
+                    "离线提示", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE)
+                if (c != JOptionPane.YES_OPTION) return
+            }
+            service.sendFileMessage(peer.id, file.absolutePath, file.name)
+            addMessageToPanel(Message(type = MessageType.FILE, senderId = service.currentUser?.id ?: "",
+                receiverId = peer.id, content = file.absolutePath, fileName = file.name,
+                fileSize = file.length(), senderName = service.username))
+        } ?: showToast("请先选择联系人或群聊")
     }
 
     private fun showMentionDialog() {
@@ -612,32 +953,74 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     fun addMessageToPanel(message: Message) {
         SwingUtilities.invokeLater {
+            val sb = messageScrollPane.verticalScrollBar
+            val wasAtBottom = sb.value + sb.visibleAmount >= sb.maximum - 50
+
             addTimeSeparatorIfNeeded(message.timestamp, lastDisplayedTimestamp)
             lastDisplayedTimestamp = message.timestamp
             val count = messagePanel.componentCount
             if (count > 0 && messagePanel.getComponent(count - 1) is Box.Filler) messagePanel.remove(count - 1)
             messagePanel.add(createMessageRow(message))
             messagePanel.add(Box.createVerticalGlue())
-            messagePanel.revalidate(); messagePanel.repaint(); scrollToBottom()
-        }
-    }
+            messagePanel.revalidate(); messagePanel.repaint()
 
-    private fun addImageMessageToPanel(file: File) {
-        SwingUtilities.invokeLater {
-            messagePanel.add(createImageMessageComponent(file))
-            messagePanel.revalidate(); messagePanel.repaint(); scrollToBottom()
-        }
-    }
-
-    private fun addFileMessageToPanel(file: File) {
-        SwingUtilities.invokeLater {
-            messagePanel.add(createFileMessageComponent(file))
-            messagePanel.revalidate(); messagePanel.repaint(); scrollToBottom()
+            val isMine = message.senderId == service.currentUser?.id
+            if (wasAtBottom || isMine) {
+                scrollToBottom()
+            } else {
+                pendingNewMsgCount++
+                updateScrollButtonText()
+            }
         }
     }
 
     private fun scrollToBottom() {
         SwingUtilities.invokeLater { messageScrollPane.verticalScrollBar.let { it.value = it.maximum } }
+    }
+
+    private fun showToast(msg: String) {
+        val toast = JWindow(SwingUtilities.getWindowAncestor(this))
+        val label = JLabel(msg, SwingConstants.CENTER).apply {
+            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            foreground = Color.WHITE; isOpaque = false
+            border = JBUI.Borders.empty(8, 18)
+        }
+        toast.contentPane = object : JPanel(BorderLayout()) {
+            override fun paintComponent(g: Graphics) {
+                val g2 = g as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = Color(0, 0, 0, 180)
+                g2.fillRoundRect(0, 0, width, height, 16, 16)
+            }
+        }.apply { isOpaque = false; add(label) }
+        toast.background = Color(0, 0, 0, 0)
+        toast.pack()
+        val owner = SwingUtilities.getWindowAncestor(this)
+        if (owner != null) {
+            toast.setLocationRelativeTo(owner)
+        }
+        toast.isVisible = true
+        javax.swing.Timer(1800) { toast.dispose() }.apply { isRepeats = false; start() }
+    }
+
+    private fun scrollToDivider(divider: JComponent) {
+        SwingUtilities.invokeLater {
+            SwingUtilities.invokeLater {
+                val rect = divider.bounds
+                rect.y = maxOf(0, rect.y - 20)
+                messagePanel.scrollRectToVisible(rect)
+            }
+        }
+    }
+
+    private fun updateScrollButtonText() {
+        val btn = scrollToBottomButton ?: return
+        btn.text = if (pendingNewMsgCount > 0) "↓ ${pendingNewMsgCount}条新消息" else "↓ 最新消息"
+        btn.background = if (pendingNewMsgCount > 0)
+            JBColor(Color(220, 70, 70, 200), Color(200, 80, 80, 210))
+        else
+            JBColor(Color(0, 0, 0, 140), Color(200, 200, 200, 160))
+        btn.parent?.let { it.doLayout(); it.repaint() }
     }
 
     // =============== Message Row (fixes vertical stretching) ===============
@@ -688,10 +1071,16 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         val bubbleColor = if (isSentByMe) ThemeManager.sentBubbleColor
         else ThemeManager.receivedBubbleColor
 
+        if (message.type == MessageType.IMAGE) {
+            return createImageBubble(message, isSentByMe, senderName, isGroupChat, bubbleColor)
+        }
+        if (message.type == MessageType.FILE) {
+            return createFileBubble(message, isSentByMe, senderName, isGroupChat, bubbleColor)
+        }
+
         val textColor = ThemeManager.messageTextColor
         val hasMention = message.mentionAll || message.mentionedUserIds.isNotEmpty()
 
-        // Strip @mention text from content since it's shown as a styled label
         var displayContent = message.content
         if (hasMention) {
             if (message.mentionAll) {
@@ -727,7 +1116,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             caretColor = Color(0, 0, 0, 0)
         }
 
-        // Calculate proper text size
         if (needsWrap) {
             textArea.setSize(contentWidth, Short.MAX_VALUE.toInt())
             val h = textArea.preferredSize.height
@@ -736,7 +1124,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             textArea.preferredSize = Dimension(naturalWidth, textArea.preferredSize.height)
         }
 
-        // Build the bubble panel with rounded background
         val bubblePanel = object : JPanel(BorderLayout(0, 3)) {
             override fun paintComponent(g: Graphics) {
                 val g2d = g as Graphics2D
@@ -753,7 +1140,6 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 add(JLabel(senderName).apply { font = NAME_FONT; foreground = ThemeManager.senderNameColor }, BorderLayout.NORTH)
             }
 
-            // Content area
             val contentPanel = JPanel().apply {
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 isOpaque = false
@@ -775,21 +1161,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 add(textArea)
             }
             add(contentPanel, BorderLayout.CENTER)
-
-            // 底部信息栏（仅时间）
-            val bottomPanel = JPanel(BorderLayout(0, 2)).apply {
-                isOpaque = false
-                
-                // 时间
-                add(JLabel(message.getFormattedTime()).apply {
-                    font = TIME_FONT
-                    foreground = if (isSentByMe) ThemeManager.sentTimestampColor
-                    else ThemeManager.timestampColor
-                    horizontalAlignment = SwingConstants.LEFT
-                }, BorderLayout.WEST)
-                
-            }
-            add(bottomPanel, BorderLayout.SOUTH)
+            add(createTimeLabel(message, isSentByMe), BorderLayout.SOUTH)
         }
 
         return JPanel(BorderLayout()).apply {
@@ -799,55 +1171,131 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
-    // =============== Image / File Components ===============
-
-    private fun createImageMessageComponent(file: File): JPanel {
-        return object : JPanel(BorderLayout()) {
-            override fun getMaximumSize() = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }.apply {
-            isOpaque = false; border = JBUI.Borders.empty(3, 12, 3, 12)
-            val wrapper = object : JPanel(BorderLayout()) {
-                override fun paintComponent(g: Graphics) {
-                    val g2d = g as Graphics2D
-                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                    g2d.color = background; g2d.fillRoundRect(0, 0, width, height, 8, 8)
-                }
-            }.apply {
-                isOpaque = false; background = ThemeManager.sentBubbleColor; border = JBUI.Borders.empty(4)
-                try {
-                    val icon = ImageIcon(file.path)
-                    val scale = minOf(200.0 / icon.iconWidth, 200.0 / icon.iconHeight, 1.0)
-                    add(JLabel(ImageIcon(icon.image.getScaledInstance((icon.iconWidth * scale).toInt(), (icon.iconHeight * scale).toInt(), Image.SCALE_SMOOTH))), BorderLayout.CENTER)
-                } catch (_: Exception) {
-                    add(JLabel("[图片] ${file.name}").apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) }, BorderLayout.CENTER)
-                }
-            }
-            add(wrapper, BorderLayout.EAST)
+    private fun createTimeLabel(message: Message, isSentByMe: Boolean): JPanel {
+        return JPanel(BorderLayout(0, 2)).apply {
+            isOpaque = false
+            add(JLabel(message.getFormattedTime()).apply {
+                font = TIME_FONT
+                foreground = if (isSentByMe) ThemeManager.sentTimestampColor else ThemeManager.timestampColor
+                horizontalAlignment = SwingConstants.LEFT
+            }, BorderLayout.WEST)
         }
     }
 
-    private fun createFileMessageComponent(file: File): JPanel {
-        return object : JPanel(BorderLayout()) {
-            override fun getMaximumSize() = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }.apply {
-            isOpaque = false; border = JBUI.Borders.empty(3, 12, 3, 12)
-            val card = object : JPanel(BorderLayout(10, 0)) {
-                override fun paintComponent(g: Graphics) {
-                    val g2d = g as Graphics2D
-                    g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                    g2d.color = background; g2d.fillRoundRect(0, 0, width, height, 8, 8)
-                }
-            }.apply {
-                isOpaque = false; background = JBColor(Color(255, 255, 255), Color(58, 58, 58))
-                border = JBUI.Borders.empty(12, 14); preferredSize = Dimension(240, 60)
-                add(JLabel(AllIcons.FileTypes.Any_type).apply { preferredSize = Dimension(36, 36) }, BorderLayout.WEST)
-                add(JPanel(BorderLayout(0, 2)).apply {
-                    isOpaque = false
-                    add(JLabel(file.name).apply { font = Font("Microsoft YaHei", Font.PLAIN, 13) }, BorderLayout.NORTH)
-                    add(JLabel("${file.length() / 1024} KB").apply { font = NAME_FONT; foreground = JBColor.GRAY }, BorderLayout.SOUTH)
-                }, BorderLayout.CENTER)
+    private fun createImageBubble(
+        message: Message, isSentByMe: Boolean, senderName: String,
+        isGroupChat: Boolean, bubbleColor: Color
+    ): JPanel {
+        val bubblePanel = object : JPanel(BorderLayout(0, 3)) {
+            override fun paintComponent(g: Graphics) {
+                val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = background
+                g2d.fillRoundRect(0, 0, width, height, 12, 12)
             }
-            add(card, BorderLayout.EAST)
+        }.apply {
+            isOpaque = false; background = bubbleColor
+            border = JBUI.Borders.empty(6, 8, 4, 8)
+
+            if (!isSentByMe && isGroupChat) {
+                add(JLabel(senderName).apply { font = NAME_FONT; foreground = ThemeManager.senderNameColor }, BorderLayout.NORTH)
+            }
+
+            val imageLabel = JLabel()
+            val imgFile = File(message.content)
+            if (imgFile.exists()) {
+                try {
+                    val icon = ImageIcon(imgFile.path)
+                    val maxDim = 200.0
+                    val scale = minOf(maxDim / icon.iconWidth, maxDim / icon.iconHeight, 1.0)
+                    val sw = (icon.iconWidth * scale).toInt()
+                    val sh = (icon.iconHeight * scale).toInt()
+                    imageLabel.icon = ImageIcon(icon.image.getScaledInstance(sw, sh, Image.SCALE_SMOOTH))
+                    imageLabel.cursor = Cursor(Cursor.HAND_CURSOR)
+                    imageLabel.toolTipText = "点击查看大图"
+                    imageLabel.addMouseListener(object : MouseAdapter() {
+                        override fun mouseClicked(e: MouseEvent?) {
+                            try { Desktop.getDesktop().open(imgFile) } catch (_: Exception) { }
+                        }
+                    })
+                } catch (_: Exception) {
+                    imageLabel.text = "[图片] ${message.fileName ?: imgFile.name}"
+                    imageLabel.font = MSG_FONT
+                }
+            } else {
+                imageLabel.text = "[图片] ${message.fileName ?: "文件不存在"}"
+                imageLabel.font = MSG_FONT
+                imageLabel.foreground = JBColor.GRAY
+            }
+            add(imageLabel, BorderLayout.CENTER)
+            add(createTimeLabel(message, isSentByMe), BorderLayout.SOUTH)
+        }
+        return JPanel(BorderLayout()).apply {
+            isOpaque = false; border = JBUI.Borders.empty(0, 6, 0, 6)
+            add(bubblePanel, BorderLayout.CENTER)
+        }
+    }
+
+    private fun createFileBubble(
+        message: Message, isSentByMe: Boolean, senderName: String,
+        isGroupChat: Boolean, bubbleColor: Color
+    ): JPanel {
+        val bubblePanel = object : JPanel(BorderLayout(0, 3)) {
+            override fun paintComponent(g: Graphics) {
+                val g2d = g as Graphics2D
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2d.color = background
+                g2d.fillRoundRect(0, 0, width, height, 12, 12)
+            }
+        }.apply {
+            isOpaque = false; background = bubbleColor
+            border = JBUI.Borders.empty(8, 12, 6, 12)
+
+            if (!isSentByMe && isGroupChat) {
+                add(JLabel(senderName).apply { font = NAME_FONT; foreground = ThemeManager.senderNameColor }, BorderLayout.NORTH)
+            }
+
+            val fileCard = JPanel(BorderLayout(10, 0)).apply {
+                isOpaque = false
+                val fileIcon = JLabel(AllIcons.FileTypes.Any_type).apply { preferredSize = Dimension(36, 36) }
+                add(fileIcon, BorderLayout.WEST)
+
+                val fileName = message.fileName ?: File(message.content).name
+                val fileSize = message.getFormattedFileSize().ifEmpty {
+                    val f = File(message.content)
+                    if (f.exists()) "${f.length() / 1024} KB" else ""
+                }
+                val infoPanel = JPanel(BorderLayout(0, 2)).apply {
+                    isOpaque = false
+                    add(JLabel(fileName).apply {
+                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        foreground = ThemeManager.messageTextColor
+                    }, BorderLayout.NORTH)
+                    if (fileSize.isNotEmpty()) {
+                        add(JLabel(fileSize).apply { font = NAME_FONT; foreground = JBColor.GRAY }, BorderLayout.SOUTH)
+                    }
+                }
+                add(infoPanel, BorderLayout.CENTER)
+
+                cursor = Cursor(Cursor.HAND_CURSOR)
+                toolTipText = "点击打开文件所在目录"
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent?) {
+                        val f = File(message.content)
+                        try {
+                            if (f.exists()) Desktop.getDesktop().open(f.parentFile)
+                            else showToast("文件不存在")
+                        } catch (_: Exception) { }
+                    }
+                })
+                preferredSize = Dimension(220, 52)
+            }
+            add(fileCard, BorderLayout.CENTER)
+            add(createTimeLabel(message, isSentByMe), BorderLayout.SOUTH)
+        }
+        return JPanel(BorderLayout()).apply {
+            isOpaque = false; border = JBUI.Borders.empty(0, 6, 0, 6)
+            add(bubblePanel, BorderLayout.CENTER)
         }
     }
 
@@ -875,6 +1323,13 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
     }
 
+    private fun groupStatusText(group: Group): String {
+        val total = group.getMemberCount()
+        val online = service.getGroupOnlineCount(group.id)
+        val muteInfo = if (group.globalMute) "（全员禁言中）" else ""
+        return "${total}人 · ${online}人在线$muteInfo${encryptionTag()}"
+    }
+
     // =============== Dialogs ===============
 
     private fun showProfileDialog() { ProfileDialog(project).showAndGet() }
@@ -889,8 +1344,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 SwingUtilities.invokeLater {
                     if (updatedGroup != null) {
                         currentGroup = updatedGroup
-                        val muteInfo = if (updatedGroup.globalMute) "（全员禁言中）" else ""
-                        statusLabel.text = "${updatedGroup.getMemberCount()} 位成员$muteInfo${encryptionTag()}"
+                        statusLabel.text = groupStatusText(updatedGroup)
                         updateHeaderButtons()
                         updateMuteStatus(updatedGroup)
                     } else {
@@ -903,6 +1357,13 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
         scope.launch {
             service.peers.collectLatest { peers ->
+                SwingUtilities.invokeLater {
+                    val group = currentGroup
+                    if (group != null) {
+                        statusLabel.text = groupStatusText(group)
+                        return@invokeLater
+                    }
+                }
                 val pid = currentPeer?.id ?: return@collectLatest
                 val updatedPeer = peers[pid]
                 SwingUtilities.invokeLater {

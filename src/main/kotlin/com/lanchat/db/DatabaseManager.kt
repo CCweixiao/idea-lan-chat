@@ -134,6 +134,13 @@ object DatabaseManager {
             )
         """)
 
+        executeUpdate("""
+            CREATE TABLE IF NOT EXISTS chat_read_state (
+                chat_id TEXT PRIMARY KEY,
+                last_read_at INTEGER NOT NULL
+            )
+        """)
+
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id)")
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id)")
         executeUpdate("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp)")
@@ -371,6 +378,7 @@ object DatabaseManager {
                     val updateStmt = connection?.prepareStatement(
                         "UPDATE messages SET read_by_user_ids = ?, read_by_user_names = ? WHERE id = ?"
                     )
+                    var updatedCount = 0
                     while (rs.next()) {
                         val msgId = rs.getLong("id")
                         val readByUserIds = gson.fromJson(rs.getString("read_by_user_ids"),
@@ -382,30 +390,74 @@ object DatabaseManager {
                             if (currentUserName.isNotBlank() && !readByUserNames.contains(currentUserName)) {
                                 readByUserNames.add(currentUserName)
                             }
-                            updateStmt?.setString(1, gson.toJson(readByUserIds))
+                            val newReadByUserIds = gson.toJson(readByUserIds)
+                            println("[DB] Marking msg $msgId as read for user $currentUserId, new read_by_user_ids: $newReadByUserIds")
+                            updateStmt?.setString(1, newReadByUserIds)
                             updateStmt?.setString(2, gson.toJson(readByUserNames))
                             updateStmt?.setLong(3, msgId)
                             updateStmt?.addBatch()
+                            updatedCount++
                         }
                     }
-                    updateStmt?.executeBatch()
+                    if (updatedCount > 0) {
+                        updateStmt?.executeBatch()
+                        println("[DB] Marked $updatedCount messages as read in group $chatId")
+                    } else {
+                        println("[DB] No messages to mark as read in group $chatId (already read)")
+                    }
                 }
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // =============== Chat Read State ===============
+
+    fun getLastReadAt(chatId: String): Long {
+        try {
+            connection?.prepareStatement(
+                "SELECT last_read_at FROM chat_read_state WHERE chat_id = ?"
+            )?.use { stmt ->
+                stmt.setString(1, chatId)
+                stmt.executeQuery()?.use { rs ->
+                    if (rs.next()) return rs.getLong("last_read_at")
+                }
+            }
+        } catch (_: Exception) { }
+        return 0L
+    }
+
+    fun updateLastReadAt(chatId: String, timestamp: Long) {
+        try {
+            connection?.prepareStatement(
+                "INSERT OR REPLACE INTO chat_read_state (chat_id, last_read_at) VALUES (?, ?)"
+            )?.use { stmt ->
+                stmt.setString(1, chatId)
+                stmt.setLong(2, timestamp)
+                stmt.executeUpdate()
+            }
+        } catch (_: Exception) { }
     }
 
     /**
-     * 获取未读消息计数
-     * 私聊：使用 is_read 字段（全局）
-     * 群聊：使用 read_by_user_ids（每用户独立）
+     * 基于 last_read_at 计算未读消息数。
+     * 私聊：统计 sender_id 发给 currentUserId 且 timestamp > last_read_at 的消息。
+     * 群聊：统计 group_id 下非自己发送且 timestamp > last_read_at 的消息。
      */
     fun getUnreadCounts(currentUserId: String): Map<String, Int> {
         val counts = ConcurrentHashMap<String, Int>()
         try {
-            // 私聊未读
-            connection?.prepareStatement(
-                "SELECT sender_id, COUNT(*) as cnt FROM messages WHERE receiver_id = ? AND sender_id != ? AND is_read = 0 GROUP BY sender_id"
-            )?.use { stmt ->
+            // 私聊未读：按发送者分组
+            connection?.prepareStatement("""
+                SELECT m.sender_id, COUNT(*) as cnt
+                FROM messages m
+                LEFT JOIN chat_read_state r ON r.chat_id = m.sender_id
+                WHERE m.receiver_id = ? AND m.sender_id != ?
+                  AND m.group_id IS NULL
+                  AND m.timestamp > COALESCE(r.last_read_at, 0)
+                GROUP BY m.sender_id
+            """)?.use { stmt ->
                 stmt.setString(1, currentUserId)
                 stmt.setString(2, currentUserId)
                 stmt.executeQuery()?.use { rs ->
@@ -414,22 +466,26 @@ object DatabaseManager {
                     }
                 }
             }
-            // 群聊未读 — 检查 read_by_user_ids 不包含当前用户的消息
-            connection?.prepareStatement(
-                "SELECT group_id, COUNT(*) as cnt FROM messages WHERE group_id IS NOT NULL AND sender_id != ? AND (read_by_user_ids IS NULL OR read_by_user_ids NOT LIKE ?) GROUP BY group_id"
-            )?.use { stmt ->
+            // 群聊未读：按群 ID 分组
+            connection?.prepareStatement("""
+                SELECT m.group_id, COUNT(*) as cnt
+                FROM messages m
+                LEFT JOIN chat_read_state r ON r.chat_id = m.group_id
+                WHERE m.group_id IS NOT NULL AND m.sender_id != ?
+                  AND m.timestamp > COALESCE(r.last_read_at, 0)
+                GROUP BY m.group_id
+            """)?.use { stmt ->
                 stmt.setString(1, currentUserId)
-                stmt.setString(2, "%\"$currentUserId\"%")
                 stmt.executeQuery()?.use { rs ->
                     while (rs.next()) {
                         val groupId = rs.getString("group_id")
-                        if (groupId != null) {
-                            counts[groupId] = rs.getInt("cnt")
-                        }
+                        if (groupId != null) counts[groupId] = rs.getInt("cnt")
                     }
                 }
             }
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
         return counts
     }
 
