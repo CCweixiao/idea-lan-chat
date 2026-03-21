@@ -72,6 +72,7 @@ class CreateGroupDialog(
 
     override fun doValidate(): ValidationInfo? {
         if (groupName.isEmpty()) return ValidationInfo("请输入群名称", groupNameField)
+        if (groupName.length > 20) return ValidationInfo("群名称不能超过20个字符", groupNameField)
         return null
     }
 

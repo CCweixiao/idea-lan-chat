@@ -1148,6 +1148,7 @@ class LanChatService : Disposable {
         val group = _groups.value[groupId] ?: return false
         if (!group.isOwner(cu.id)) return false
         if (group.memberIds.contains(peerId)) return false
+        if (peerId == FILE_TRANSFER_ASSISTANT_ID) return false  // 不允许邀请文件传输助手入群
 
         val peer = _peers.value[peerId] ?: return false
         val request = GroupRequest(

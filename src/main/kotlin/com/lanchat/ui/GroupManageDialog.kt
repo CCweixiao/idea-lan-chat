@@ -69,7 +69,7 @@ class GroupManageDialog(
         availableContactsModel.clear()
         group?.let { g ->
             service.peers.value.values
-                .filter { !g.memberIds.contains(it.id) && it.id != service.currentUser?.id }
+                .filter { !g.memberIds.contains(it.id) && it.id != service.currentUser?.id && it.id != LanChatService.FILE_TRANSFER_ASSISTANT_ID }
                 .forEach { availableContactsModel.addElement(it) }
         }
     }
@@ -476,7 +476,15 @@ class GroupManageDialog(
                 object : DialogWrapperAction("保存") {
                     override fun doAction(e: ActionEvent?) {
                         val newName = groupNameField.text.trim()
-                        if (newName.isNotEmpty() && newName != group?.name) {
+                        if (newName.isEmpty()) {
+                            JOptionPane.showMessageDialog(window, "群名称不能为空", "提示", JOptionPane.WARNING_MESSAGE)
+                            return
+                        }
+                        if (newName.length > 20) {
+                            JOptionPane.showMessageDialog(window, "群名称不能超过20个字符", "提示", JOptionPane.WARNING_MESSAGE)
+                            return
+                        }
+                        if (newName != group?.name) {
                             service.updateGroupName(groupId, newName)
                         }
                         close(OK_EXIT_CODE)

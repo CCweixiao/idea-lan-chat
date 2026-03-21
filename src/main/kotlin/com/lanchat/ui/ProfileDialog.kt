@@ -175,8 +175,8 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
         if (nickname.isEmpty()) {
             return ValidationInfo("昵称不能为空", nicknameField)
         }
-        if (nickname.length > 20) {
-            return ValidationInfo("昵称长度不能超过20个字符", nicknameField)
+        if (nickname.length > 10) {
+            return ValidationInfo("昵称不能超过10个字符", nicknameField)
         }
         return null
     }
