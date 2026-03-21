@@ -194,6 +194,8 @@ class ProfileDialog(private val project: Project) : DialogWrapper(project) {
         service.setEncryptionEnabled(encryptionCheckbox.isSelected)
         val key = String(encryptionKeyField.password).trim()
         service.updateEncryptionKey(key)
+
+        service.broadcastProfileUpdate()
         
         super.doOKAction()
     }

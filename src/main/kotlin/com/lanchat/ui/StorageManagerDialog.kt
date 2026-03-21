@@ -112,8 +112,7 @@ class StorageManagerDialog(private val project: Project) : JDialog() {
 
     private fun updateInfo() {
         val info = service.getStorageInfo()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        
+
         val sb = StringBuilder()
         sb.appendLine("📊 存储空间使用情况")
         sb.appendLine()

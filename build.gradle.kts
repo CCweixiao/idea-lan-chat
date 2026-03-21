@@ -26,12 +26,19 @@ intellij {
     pluginName.set(providers.gradleProperty("pluginName"))
     version.set(providers.gradleProperty("platformVersion"))
     type.set(providers.gradleProperty("platformType"))
-    
+
     // 不自动更新
     updateSinceUntilBuild.set(false)
-    
+
     // Plugin Dependencies
     plugins.set(providers.gradleProperty("platformPlugins").map { it.split(',').map(String::trim).filter(String::isNotEmpty) })
+}
+
+// 禁用 Java agent（解决 coroutines-javaagent.jar 问题）
+tasks.withType<org.jetbrains.intellij.tasks.RunIdeTask> {
+    jvmArgs("-Djava.awt.headless=false")
+    // 禁用 instrument agent
+    systemProperty("idea.log.debug.categories", "#org.jetbrains.kotlin.idea")
 }
 
 dependencies {
@@ -52,11 +59,6 @@ kotlin {
 }
 
 tasks {
-    // Disable the problematic version check task
-    named("initializeIntelliJPlugin") {
-        enabled = false
-    }
-
     withType<JavaCompile> {
         sourceCompatibility = "17"
         targetCompatibility = "17"
