@@ -9,6 +9,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import java.io.*
 import java.net.*
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -42,6 +43,13 @@ class NetworkManager(
     companion object {
         private const val DISCOVERY_INTERVAL = 5000L
         private const val ENCRYPTED_PREFIX = "ENC:"
+        private const val FILE_HEADER_PREFIX = "FILE:"
+        private val LAN_CHAT_DIR = File(System.getProperty("user.home"), ".lanchat/files")
+
+        fun getLanChatDir(): File {
+            if (!LAN_CHAT_DIR.exists()) LAN_CHAT_DIR.mkdirs()
+            return LAN_CHAT_DIR
+        }
     }
 
     private fun encryptJson(json: String): String {
@@ -138,35 +146,76 @@ class NetworkManager(
 
     private suspend fun handleClientConnection(socket: Socket) {
         try {
-            val reader = socket.getInputStream().bufferedReader()
-            val writer = socket.getOutputStream().bufferedWriter()
-            
+            val input = socket.getInputStream().buffered()
+            val output = socket.outputStream
+
             while (isRunning && !socket.isClosed) {
-                val raw = reader.readLine() ?: break
+                val lineBytes = readLine(input) ?: break
+                val raw = String(lineBytes, Charsets.UTF_8)
                 try {
-                    val json = decryptJson(raw)
-                    val message = gson.fromJson(json, Message::class.java)
-                    
-                    if (message.type == MessageType.PROBE) {
-                        val response = Message(
-                            type = MessageType.PROBE_RESPONSE,
-                            senderId = currentUserId,
-                            receiverId = message.senderId,
-                            content = "",
-                            senderName = currentUsername
-                        )
-                        val responseJson = encryptJson(gson.toJson(response))
-                        writer.write("$responseJson\n")
-                        writer.flush()
-                        break
+                    if (raw.startsWith(FILE_HEADER_PREFIX)) {
+                        val fileSize = raw.removePrefix(FILE_HEADER_PREFIX).toLong()
+                        val headerLineBytes = readLine(input) ?: break
+                        val headerJson = decryptJson(String(headerLineBytes, Charsets.UTF_8))
+                        val message = gson.fromJson(headerJson, Message::class.java)
+
+                        val dir = getLanChatDir()
+                        val safeFileName = (message.fileName ?: "file_${System.currentTimeMillis()}")
+                            .replace(Regex("[^a-zA-Z0-9._\\-\\u4e00-\\u9fff]"), "_")
+                        var target = File(dir, safeFileName)
+                        if (target.exists()) {
+                            val ext = safeFileName.substringAfterLast('.', "")
+                            val base = safeFileName.substringBeforeLast('.', safeFileName)
+                            target = File(dir, "${base}_${System.currentTimeMillis()}.$ext")
+                        }
+                        FileOutputStream(target).use { fos ->
+                            var remaining = fileSize
+                            val buf = ByteArray(8192)
+                            while (remaining > 0) {
+                                val toRead = minOf(buf.size.toLong(), remaining).toInt()
+                                val read = input.read(buf, 0, toRead)
+                                if (read == -1) break
+                                fos.write(buf, 0, read)
+                                remaining -= read
+                            }
+                        }
+                        val receivedMsg = message.copy(content = target.absolutePath)
+                        _messageReceived.emit(receivedMsg)
+                    } else {
+                        val json = decryptJson(raw)
+                        val message = gson.fromJson(json, Message::class.java)
+
+                        if (message.type == MessageType.PROBE) {
+                            val response = Message(
+                                type = MessageType.PROBE_RESPONSE,
+                                senderId = currentUserId,
+                                receiverId = message.senderId,
+                                content = "",
+                                senderName = currentUsername
+                            )
+                            val responseJson = encryptJson(gson.toJson(response))
+                            output.write("$responseJson\n".toByteArray())
+                            output.flush()
+                            break
+                        }
+
+                        _messageReceived.emit(message)
                     }
-                    
-                    _messageReceived.emit(message)
                 } catch (_: Exception) { }
             }
         } catch (_: Exception) {
         } finally {
             try { socket.close() } catch (_: Exception) { }
+        }
+    }
+
+    private fun readLine(input: InputStream): ByteArray? {
+        val baos = ByteArrayOutputStream()
+        while (true) {
+            val b = input.read()
+            if (b == -1) return if (baos.size() > 0) baos.toByteArray() else null
+            if (b == '\n'.code) return baos.toByteArray()
+            baos.write(b)
         }
     }
 
@@ -196,16 +245,34 @@ class NetworkManager(
 
     /**
      * Send a message to a single target via TCP.
+     * For IMAGE/FILE messages with fileData, uses the binary file transfer protocol.
      */
     suspend fun sendMessage(message: Message, targetIp: String, targetPort: Int = tcpPort) {
-        val json = gson.toJson(message)
-        val encrypted = encryptJson(json)
         withContext(Dispatchers.IO) {
             try {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress(targetIp, targetPort), 3000)
-                    socket.outputStream.write("$encrypted\n".toByteArray())
-                    socket.outputStream.flush()
+                    socket.connect(InetSocketAddress(targetIp, targetPort), 5000)
+                    socket.soTimeout = 30000
+                    val out = socket.outputStream.buffered()
+
+                    val hasFilePayload = message.fileData != null && message.type in listOf(
+                        MessageType.IMAGE, MessageType.FILE, MessageType.PROFILE_UPDATE
+                    )
+                    if (hasFilePayload) {
+                        val headerMsg = message.copy(content = "")
+                        val headerJson = encryptJson(gson.toJson(headerMsg))
+                        val data = message.fileData!!
+                        val fileSize = data.size.toLong()
+                        out.write("$FILE_HEADER_PREFIX$fileSize\n".toByteArray())
+                        out.write("$headerJson\n".toByteArray())
+                        out.write(data)
+                        out.flush()
+                    } else {
+                        val json = gson.toJson(message)
+                        val encrypted = encryptJson(json)
+                        out.write("$encrypted\n".toByteArray())
+                        out.flush()
+                    }
                 }
             } catch (_: Exception) { }
         }
@@ -226,18 +293,18 @@ class NetworkManager(
                     senderName = currentUsername
                 )
                 val encrypted = encryptJson(gson.toJson(probeMsg))
-                
+
                 Socket().use { socket ->
                     socket.soTimeout = timeoutMs.toInt()
                     socket.connect(InetSocketAddress(targetIp, targetPort), 3000)
-                    
+
                     socket.outputStream.write("$encrypted\n".toByteArray())
                     socket.outputStream.flush()
-                    
+
                     val reader = socket.getInputStream().bufferedReader()
                     val raw = reader.readLine() ?: return@withContext null
                     val responseJson = decryptJson(raw)
-                    
+
                     val response = gson.fromJson(responseJson, Message::class.java)
                     if (response.type == MessageType.PROBE_RESPONSE) {
                         Peer(
