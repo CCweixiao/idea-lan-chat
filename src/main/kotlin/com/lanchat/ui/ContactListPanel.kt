@@ -37,6 +37,7 @@ class ContactListPanel(
     }
     private val scrollPane: JBScrollPane
     private val statusLabel = JLabel()
+    private val nicknameLabel = JLabel()
     private val searchField = PlaceholderTextField("搜索联系人/群聊")
 
     private var groupItems = mutableListOf<ChatItem.GroupItem>()
@@ -81,14 +82,12 @@ class ContactListPanel(
 
             val titlePanel = JPanel(BorderLayout()).apply {
                 isOpaque = false
-                add(JLabel("消息").apply { font = TITLE_FONT }, BorderLayout.NORTH)
-                add(JPanel(FlowLayout(FlowLayout.LEFT, 0, 2)).apply {
-                    isOpaque = false
-                    add(JLabel("IP: ").apply { font = SUB_FONT; foreground = JBColor.GRAY })
-                    add(JLabel(service.localIp).apply {
-                        font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
-                    })
-                }, BorderLayout.SOUTH)
+                add(JLabel("好友列表").apply { font = TITLE_FONT }, BorderLayout.NORTH)
+                nicknameLabel.apply {
+                    text = "${service.username} · ${service.localIp}"
+                    font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
+                }
+                add(nicknameLabel, BorderLayout.SOUTH)
             }
             add(titlePanel, BorderLayout.WEST)
 
@@ -201,7 +200,7 @@ class ContactListPanel(
 
     // =============== Contact Item Panel ===============
 
-    private fun createItemPanel(item: ChatItem): JPanel {
+    private fun createItemPanel(item: ChatItem, isPinned: Boolean = false, isAssistant: Boolean = false): JPanel {
         val isSelected = item == selectedItem
         val chatId = when (item) {
             is ChatItem.GroupItem -> item.group.id
@@ -209,6 +208,7 @@ class ContactListPanel(
         }
         val unreadCount = service.unreadCounts.value[chatId] ?: 0
 
+        val pinnedBg = JBColor(Color(242, 242, 242), Color(52, 52, 52))
         class HoverPanel : JPanel(BorderLayout()) {
             var hovering = false
             override fun getMaximumSize() = Dimension(Int.MAX_VALUE, preferredSize.height)
@@ -217,6 +217,7 @@ class ContactListPanel(
                 g2d.color = when {
                     isSelected -> ThemeManager.itemSelected
                     hovering -> ThemeManager.itemHover
+                    isPinned -> pinnedBg
                     else -> ThemeManager.listBackground
                 }
                 g2d.fillRect(0, 0, width, height)
@@ -234,7 +235,7 @@ class ContactListPanel(
         val nameText: String
         val subText: String
         var isGroup = false
-        var isOnline = false
+        var peerRef: Peer? = null  // 保存 peer 引用，用于实时获取状态
 
         when (item) {
             is ChatItem.GroupItem -> {
@@ -246,20 +247,21 @@ class ContactListPanel(
             }
             is ChatItem.PeerItem -> {
                 val peer = item.peer
+                peerRef = peer
                 nameText = peer.username
-                subText = peer.ipAddress
-                isOnline = peer.isOnline
-                avatarPanel = createAvatarPanel(peer.username.firstOrNull()?.toString() ?: "?", false)
+                subText = if (isAssistant) "本地文件存储" else peer.ipAddress
+                avatarPanel = if (isAssistant) createAvatarPanel("📁", false, Color(64, 158, 255))
+                    else createAvatarPanel(peer.username.firstOrNull()?.toString() ?: "?", false)
             }
         }
 
         panel.add(avatarPanel, BorderLayout.WEST)
 
-        // 中间信息面板
+        val displayName = if (isPinned) "📌 $nameText" else nameText
         val infoPanel = JPanel(BorderLayout(0, 2)).apply {
             isOpaque = false
             border = JBUI.Borders.emptyLeft(12)
-            add(JLabel(nameText).apply { font = NAME_FONT }, BorderLayout.CENTER)
+            add(JLabel(displayName).apply { font = NAME_FONT }, BorderLayout.CENTER)
             add(JLabel(subText).apply { font = SUB_FONT; foreground = JBColor.GRAY }, BorderLayout.SOUTH)
         }
         panel.add(infoPanel, BorderLayout.CENTER)
@@ -306,7 +308,7 @@ class ContactListPanel(
         }
 
         // 在线状态指示
-        if (!isGroup) {
+        if (!isGroup && !isAssistant) {
             rightPanel.add(JPanel(FlowLayout(FlowLayout.RIGHT, 0, if (unreadCount > 0) 26 else 14)).apply {
                 isOpaque = false
                 preferredSize = Dimension(16, if (unreadCount > 0) 36 else 44)
@@ -315,7 +317,10 @@ class ContactListPanel(
                         super.paintComponent(g)
                         val g2d = g as Graphics2D
                         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                        g2d.color = if (isOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
+                        // 实时从 service 获取最新在线状态
+                        val currentPeer = peerRef?.let { service.peers.value[it.id] }
+                        val actuallyOnline = currentPeer?.isOnline ?: false
+                        g2d.color = if (actuallyOnline) ThemeManager.onlineColor else ThemeManager.offlineColor
                         g2d.fillOval(0, 0, 8, 8)
                     }
                 }.apply { isOpaque = false; preferredSize = Dimension(8, 8) })
@@ -330,8 +335,8 @@ class ContactListPanel(
                     selectedItem = item; onChatItemSelected(item); rebuildList()
                 }
             }
-            override fun mousePressed(e: MouseEvent) { if (e.isPopupTrigger) showPopupMenu(e, item) }
-            override fun mouseReleased(e: MouseEvent) { if (e.isPopupTrigger) showPopupMenu(e, item) }
+            override fun mousePressed(e: MouseEvent) { if (e.isPopupTrigger) showPopupMenu(e, item, isAssistant) }
+            override fun mouseReleased(e: MouseEvent) { if (e.isPopupTrigger) showPopupMenu(e, item, isAssistant) }
             override fun mouseEntered(e: MouseEvent) { panel.hovering = true; panel.repaint() }
             override fun mouseExited(e: MouseEvent) { panel.hovering = false; panel.repaint() }
         })
@@ -339,7 +344,7 @@ class ContactListPanel(
         return panel
     }
 
-    private fun createAvatarPanel(initial: String, isGroup: Boolean): JPanel {
+    private fun createAvatarPanel(initial: String, isGroup: Boolean, colorOverride: Color? = null): JPanel {
         val peerColors = ThemeManager.avatarColors
         val groupColor = ThemeManager.groupIconColor
 
@@ -353,10 +358,10 @@ class ContactListPanel(
                 val y = (height - size) / 2
 
                 if (isGroup) {
-                    g2d.color = groupColor
+                    g2d.color = colorOverride ?: groupColor
                     g2d.fillRoundRect(x, y, size, size, 10, 10)
                 } else {
-                    val color = peerColors[Math.abs(initial.hashCode()) % peerColors.size]
+                    val color = colorOverride ?: peerColors[Math.abs(initial.hashCode()) % peerColors.size]
                     g2d.color = color
                     g2d.fill(Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
                 }
@@ -378,19 +383,22 @@ class ContactListPanel(
     // =============== Data & Rebuild ===============
 
     private fun observeData() {
-        scope.launch { service.peers.collectLatest { updateData() } }
+        scope.launch { service.peers.collect { updateData() } }
         scope.launch { service.groups.collectLatest { updateData() } }
         scope.launch { service.unreadCounts.collectLatest { updateData() } }
+        scope.launch { service.pinnedIds.collectLatest { SwingUtilities.invokeLater { rebuildList() } } }
     }
 
     private fun updateData() {
         SwingUtilities.invokeLater {
+            nicknameLabel.text = "${service.username} · ${service.localIp}"
             groupItems.clear()
             peerItems.clear()
             service.groups.value.values.sortedByDescending { it.createdAt }.forEach {
                 groupItems.add(ChatItem.GroupItem(it))
             }
             service.peers.value.values
+                .filter { it.id != LanChatService.FILE_TRANSFER_ASSISTANT_ID }
                 .sortedWith(compareByDescending<Peer> { it.isOnline }.thenByDescending { it.lastSeen })
                 .forEach { peerItems.add(ChatItem.PeerItem(it)) }
             rebuildList()
@@ -400,6 +408,7 @@ class ContactListPanel(
 
     private fun rebuildList() {
         val query = searchField.text.trim().lowercase()
+        val pinned = service.pinnedIds.value
 
         val filteredGroups = if (query.isEmpty()) groupItems else groupItems.filter {
             it.group.name.lowercase().contains(query) || it.group.groupNumber.contains(query)
@@ -408,20 +417,32 @@ class ContactListPanel(
             it.peer.username.lowercase().contains(query) || it.peer.ipAddress.contains(query)
         }
 
+        val pinnedGroupItems = filteredGroups.filter { pinned.contains(it.group.id) }
+        val normalGroupItems = filteredGroups.filter { !pinned.contains(it.group.id) }
+        val pinnedPeerItems = filteredPeers.filter { pinned.contains(it.peer.id) }
+        val normalPeerItems = filteredPeers.filter { !pinned.contains(it.peer.id) }
+
         contentPanel.removeAll()
+
+        val fta = ChatItem.PeerItem(LanChatService.FILE_TRANSFER_ASSISTANT)
+        if (query.isEmpty() || "文件传输助手".contains(query)) {
+            contentPanel.add(createItemPanel(fta, isAssistant = true))
+        }
 
         contentPanel.add(createSectionHeader("群聊", filteredGroups.size, isGroupExpanded) {
             isGroupExpanded = !isGroupExpanded; rebuildList()
         })
         if (isGroupExpanded) {
-            filteredGroups.forEach { contentPanel.add(createItemPanel(it)) }
+            pinnedGroupItems.forEach { contentPanel.add(createItemPanel(it, isPinned = true)) }
+            normalGroupItems.forEach { contentPanel.add(createItemPanel(it)) }
         }
 
         contentPanel.add(createSectionHeader("好友", filteredPeers.size, isPeerExpanded) {
             isPeerExpanded = !isPeerExpanded; rebuildList()
         })
         if (isPeerExpanded) {
-            filteredPeers.forEach { contentPanel.add(createItemPanel(it)) }
+            pinnedPeerItems.forEach { contentPanel.add(createItemPanel(it, isPinned = true)) }
+            normalPeerItems.forEach { contentPanel.add(createItemPanel(it)) }
         }
 
         contentPanel.add(Box.createVerticalGlue())
@@ -454,8 +475,15 @@ class ContactListPanel(
         }
     }
 
-    private fun showPopupMenu(e: MouseEvent, item: ChatItem) {
+    private fun showPopupMenu(e: MouseEvent, item: ChatItem, isAssistant: Boolean = false) {
         val menu = JPopupMenu()
+        val itemId = when (item) {
+            is ChatItem.GroupItem -> item.group.id
+            is ChatItem.PeerItem -> item.peer.id
+        }
+        val pinText = if (service.isPinned(itemId)) "取消置顶" else "置顶"
+        menu.add(createMenuItem(pinText) { service.togglePin(itemId) })
+
         when (item) {
             is ChatItem.GroupItem -> {
                 menu.add(createMenuItem("群管理") {
@@ -475,15 +503,18 @@ class ContactListPanel(
                 }
             }
             is ChatItem.PeerItem -> {
-                menu.add(createMenuItem("删除联系人", ThemeManager.dangerTextColor) {
-                    val confirm = JOptionPane.showConfirmDialog(
-                        this, "确定要删除联系人「${item.peer.username}」吗？", "确认", JOptionPane.YES_NO_OPTION
-                    )
-                    if (confirm == JOptionPane.YES_OPTION) {
-                        service.removePeer(item.peer.id)
-                        if (selectedItem == item) { selectedItem = null; onChatItemSelected(null) }
-                    }
-                })
+                if (!isAssistant) {
+                    menu.addSeparator()
+                    menu.add(createMenuItem("删除联系人", ThemeManager.dangerTextColor) {
+                        val confirm = JOptionPane.showConfirmDialog(
+                            this, "确定要删除联系人「${item.peer.username}」吗？", "确认", JOptionPane.YES_NO_OPTION
+                        )
+                        if (confirm == JOptionPane.YES_OPTION) {
+                            service.removePeer(item.peer.id)
+                            if (selectedItem == item) { selectedItem = null; onChatItemSelected(null) }
+                        }
+                    })
+                }
             }
         }
         menu.show(e.component, e.x, e.y)
