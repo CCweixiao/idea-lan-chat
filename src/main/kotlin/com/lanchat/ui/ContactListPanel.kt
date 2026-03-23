@@ -512,6 +512,15 @@ class ContactListPanel(
             is ChatItem.PeerItem -> {
                 if (!isAssistant) {
                     menu.addSeparator()
+                    menu.add(createMenuItem("复制用户名") {
+                        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        clipboard.setContents(java.awt.datatransfer.StringSelection(item.peer.username), null)
+                    })
+                    menu.add(createMenuItem("复制 IP 地址") {
+                        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        clipboard.setContents(java.awt.datatransfer.StringSelection(item.peer.ipAddress), null)
+                    })
+                    menu.addSeparator()
                     menu.add(createMenuItem("删除联系人", ThemeManager.dangerTextColor) {
                         val confirm = JOptionPane.showConfirmDialog(
                             this, "确定要删除联系人「${item.peer.username}」吗？", "确认", JOptionPane.YES_NO_OPTION
