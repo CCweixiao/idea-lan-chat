@@ -29,7 +29,6 @@ class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private val pendingRequestIps = mutableSetOf<String>()
-    private val friendPeerIds = mutableSetOf<String>()
 
     init {
         loadExistingData()
@@ -97,9 +96,6 @@ class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun loadExistingData() {
-        friendPeerIds.addAll(service.peers.value.keys.filter {
-            it != service.currentUser?.id && it != "file_transfer_assistant"
-        })
         service.friendRequests.value.values
             .filter { it.status.name == "PENDING_SENT" }
             .forEach { pendingRequestIps.add("${it.toIp}:${it.toPort}") }
@@ -136,10 +132,12 @@ class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
             it.id != myId && it.id != "file_transfer_assistant"
         }
 
-        friendPeerIds.clear()
-        friendPeerIds.addAll(allPeers
-            .filter { it.id != myId && it.id != "file_transfer_assistant" }
-            .map { it.id })
+        // 已有好友 = friendRequests 中状态为 ACCEPTED 且来自该 peer 的请求
+        val acceptedPeerIds = service.friendRequests.value.values
+            .filter { it.status.name == "ACCEPTED" }
+            .map { setOf(it.fromUserId, it.toIp) }
+            .flatten()
+            .toSet()
 
         listPanel.removeAll()
 
@@ -167,7 +165,7 @@ class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
 
             sorted.forEach { peer ->
                 val ipPort = "${peer.ipAddress}:${peer.port}"
-                val isAlreadyFriend = friendPeerIds.contains(peer.id)
+                val isAlreadyFriend = acceptedPeerIds.contains(peer.id)
                 val hasPendingRequest = pendingRequestIps.contains(ipPort)
                 val isSelf = peer.ipAddress == myIp
                 listPanel.add(createPeerItem(peer, isAlreadyFriend, hasPendingRequest, isSelf))
