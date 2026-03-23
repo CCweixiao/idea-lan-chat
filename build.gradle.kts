@@ -75,11 +75,11 @@ tasks {
         kotlinOptions.freeCompilerArgs = listOf("-Xjsr305=strict")
     }
 
+    // 通过 patchPluginXml 注入版本和兼容性信息
     patchPluginXml {
         sinceBuild.set(providers.gradleProperty("pluginSinceBuild"))
         untilBuild.set(providers.gradleProperty("pluginUntilBuild"))
     }
-
     test {
         useJUnitPlatform()
     }
