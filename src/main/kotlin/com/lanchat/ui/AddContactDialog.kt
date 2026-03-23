@@ -25,6 +25,8 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
     private val portField = JTextField("8889", 6)
     private val greetingField = JTextField(20)
 
+    private var nearbyPanel: NearbyPeoplePanel? = null
+
     init {
         title = "联系人与群"
         init()
@@ -37,6 +39,7 @@ class AddContactDialog(private val project: Project) : DialogWrapper(project) {
             font = Font("Microsoft YaHei", Font.PLAIN, 13)
             addTab("好友申请", createFriendRequestTab())
             addTab("添加联系人", createAddContactTab())
+            addTab("附近的人", NearbyPeoplePanel(project).also { nearbyPanel = it })
             addTab("申请记录", createRequestHistoryTab())
         }
         return JPanel(BorderLayout()).apply {

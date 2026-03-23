@@ -101,7 +101,6 @@ class ContactListPanel(
             val buttonPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
                 isOpaque = false
                 add(createWechatButton(AllIcons.General.Add, "添加联系人") { showAddContactDialog() })
-                add(createWechatButton(AllIcons.Actions.Find, "附近的人") { showNearbyPeople() })
                 add(createWechatButton(AllIcons.Actions.AddMulticaret, "创建群聊") { showCreateGroupDialog() })
             }
             add(buttonPanel, BorderLayout.EAST)
@@ -469,10 +468,6 @@ class ContactListPanel(
 
     private fun showAddContactDialog() {
         AddContactDialog(project).showAndGet()
-    }
-
-    private fun showNearbyPeople() {
-        NearbyPeopleDialog(project).show()
     }
 
     private fun showCreateGroupDialog() {

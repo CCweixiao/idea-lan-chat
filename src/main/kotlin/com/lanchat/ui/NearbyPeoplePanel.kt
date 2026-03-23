@@ -16,9 +16,9 @@ import java.awt.RenderingHints
 import javax.swing.*
 
 /**
- * 查找附近的人 - 扫描局域网内安装了插件且在线的用户
+ * 查找附近的人 - JPanel 版本，嵌入 AddContactDialog 的 tab 中
  */
-class NearbyPeopleDialog(private val project: Project) : JDialog() {
+class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val service = LanChatService.getInstance()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -27,25 +27,12 @@ class NearbyPeopleDialog(private val project: Project) : JDialog() {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = false
     }
-    private val scrollPane: JBScrollPane
 
-    private val pendingRequestIps = mutableSetOf<String>()  // 已发送好友申请的 IP:Port
-    private val friendPeerIds = mutableSetOf<String>()       // 已是好友的 peerId
+    private val pendingRequestIps = mutableSetOf<String>()
+    private val friendPeerIds = mutableSetOf<String>()
 
     init {
-        title = "查找附近的人"
-        isModal = false
-        size = Dimension(380, 480)
-        minimumSize = Dimension(320, 300)
-        isResizable = true
-        setLocationRelativeTo(null)
-
         loadExistingData()
-
-        val mainPanel = JPanel(BorderLayout(0, 8)).apply {
-            border = JBUI.Borders.empty(12)
-            background = JBColor.PanelBackground
-        }
 
         // 顶部：提示 + 重新扫描按钮
         val headerPanel = JPanel(BorderLayout()).apply {
@@ -64,30 +51,29 @@ class NearbyPeopleDialog(private val project: Project) : JDialog() {
             add(refreshBtn, BorderLayout.EAST)
         }
 
-        val tipPanel = JPanel(BorderLayout()).apply {
+        val tipPanel = JPanel().apply {
             isOpaque = false
-            add(JLabel("显示局域网内安装了 LAN Chat 插件的用户").apply {
+            add(JLabel("显示局域网内安装了 LAN Chat 插件的用户，可一键发送好友申请").apply {
                 font = ThemeManager.plainFont(-3)
                 foreground = JBColor.GRAY
-            }, BorderLayout.WEST)
+            })
         }
 
         val topContainer = JPanel(BorderLayout(0, 4)).apply {
             isOpaque = false
+            border = JBUI.Borders.emptyBottom(8)
             add(headerPanel, BorderLayout.NORTH)
             add(tipPanel, BorderLayout.SOUTH)
         }
-        mainPanel.add(topContainer, BorderLayout.NORTH)
+        add(topContainer, BorderLayout.NORTH)
 
         // 列表
-        scrollPane = JBScrollPane(listPanel).apply {
+        val scrollPane = JBScrollPane(listPanel).apply {
             border = JBUI.Borders.empty()
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             background = JBColor.PanelBackground
         }
-        mainPanel.add(scrollPane, BorderLayout.CENTER)
-
-        contentPane = mainPanel
+        add(scrollPane, BorderLayout.CENTER)
 
         // 监听 peers 变化
         scope.launch {
@@ -111,8 +97,8 @@ class NearbyPeopleDialog(private val project: Project) : JDialog() {
     }
 
     private fun loadExistingData() {
-        friendPeerIds.addAll(service.peers.value.keys.filter { 
-            it != service.currentUser?.id && it != "file_transfer_assistant" 
+        friendPeerIds.addAll(service.peers.value.keys.filter {
+            it != service.currentUser?.id && it != "file_transfer_assistant"
         })
         service.friendRequests.value.values
             .filter { it.status.name == "PENDING_SENT" }
@@ -314,12 +300,7 @@ class NearbyPeopleDialog(private val project: Project) : JDialog() {
         return panel
     }
 
-    override fun show() {
-        super.show()
-    }
-
-    override fun dispose() {
-        super.dispose()
+    fun dispose() {
         scope.cancel()
     }
 }
