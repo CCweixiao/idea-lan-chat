@@ -11,6 +11,11 @@ import com.lanchat.ui.ThemeManager
 @State(name = "LanChatSettings", storages = [Storage("lanchat.xml")])
 class LanChatSettings : PersistentStateComponent<LanChatSettings.State> {
 
+    companion object {
+        fun getInstance(): LanChatSettings =
+            com.intellij.openapi.application.ApplicationManager.getApplication().getService(LanChatSettings::class.java)
+    }
+
     data class State(
         var username: String = "",
         var theme: String = ThemeManager.Theme.LIGHT.name,

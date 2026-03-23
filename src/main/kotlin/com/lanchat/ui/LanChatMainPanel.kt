@@ -26,7 +26,7 @@ class LanChatMainPanel(
     private var savedToolWindowType: ToolWindowType = ToolWindowType.DOCKED
 
     init {
-        val settings = LanChatSettings()
+        val settings = LanChatSettings.getInstance()
         settings.loadState(settings.state)
         setupUI()
     }

@@ -121,7 +121,7 @@ class LanChatService : Disposable {
             newId
         }
 
-        val settings = LanChatSettings()
+        val settings = LanChatSettings.getInstance()
         _currentUser = Peer(id = userId, username = _username, ipAddress = _localIp, port = settings.getTcpPort())
 
         val loadedPeers = DatabaseManager.loadPeers().mapValues { (_, peer) ->

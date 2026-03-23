@@ -13,7 +13,7 @@ import javax.swing.*
  */
 class LanChatSettingsConfigurable : Configurable {
     
-    private val settings = LanChatSettings()
+    private val settings = LanChatSettings.getInstance()
     private val service = LanChatService.getInstance()
     private var usernameField: JTextField? = null
     private var themeCombo: JComboBox<String>? = null
