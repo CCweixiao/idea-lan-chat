@@ -48,7 +48,12 @@ data class Message(
     
     // 群消息已读回执
     val readByUserIds: List<String> = emptyList(),      // 已读用户ID列表
-    val readByUserNames: List<String> = emptyList()     // 已读用户昵称列表（用于显示）
+    val readByUserNames: List<String> = emptyList(),    // 已读用户昵称列表（用于显示）
+    
+    // 群成员快照（每条群消息携带，用于接收端自愈）
+    val groupMemberIds: List<String> = emptyList(),     // 群成员ID列表快照
+    val groupName: String? = null,                      // 群名称（用于自愈时恢复群信息）
+    val groupOwnerName: String? = null                  // 群主昵称（用于自愈时恢复群信息）
 ) {
     /**
      * 判断是否是自己发送的消息

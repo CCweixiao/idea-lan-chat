@@ -606,6 +606,10 @@ object DatabaseManager {
             connection?.prepareStatement("DELETE FROM groups WHERE id = ?")?.use { stmt ->
                 stmt.setString(1, groupId); stmt.executeUpdate()
             }
+            // 同时删除该群的所有消息记录
+            connection?.prepareStatement("DELETE FROM messages WHERE group_id = ?")?.use { stmt ->
+                stmt.setString(1, groupId); stmt.executeUpdate()
+            }
         } catch (e: Exception) { e.printStackTrace() }
     }
 

@@ -307,7 +307,16 @@ class LanChatService : Disposable {
             else -> {
                 // 对于群聊消息，检查用户是否还在群中
                 if (isGroupMessage(message) && !isMemberOfGroup(message.groupId)) {
-                    return // 非群成员不接收新消息，但历史记录保留
+                    // 自愈机制：如果消息携带了群成员快照且包含自己，自动加入群
+                    if (trySelfHealGroup(message)) {
+                        addMessageToHistory(message)
+                        notifyMessageListeners(message)
+                        val chatId = message.groupId ?: return
+                        if (chatId != currentChatId) {
+                            incrementUnreadCount(chatId)
+                        }
+                    }
+                    return
                 }
                 addMessageToHistory(message)
                 notifyMessageListeners(message)
@@ -531,6 +540,19 @@ class LanChatService : Disposable {
         return group.memberIds.filter { it != myId }.mapNotNull { resolvePeerTarget(it) }
     }
 
+    /**
+     * 为群消息附加成员快照信息，用于接收端自愈（非好友或群同步丢失时可自动恢复群信息）
+     */
+    private fun withGroupSnapshot(message: Message, groupId: String): Message {
+        val group = _groups.value[groupId] ?: return message
+        val ownerPeer = _peers.value[group.ownerId]
+        return message.copy(
+            groupMemberIds = group.memberIds.toList(),
+            groupName = group.name,
+            groupOwnerName = ownerPeer?.username ?: group.ownerId
+        )
+    }
+
     // =============== Sending Messages ===============
 
     fun sendTextMessage(receiverId: String, content: String) {
@@ -623,9 +645,10 @@ class LanChatService : Disposable {
             content = content, mentionedUserIds = mentionedUserIds,
             mentionAll = mentionAll, groupId = groupId, senderName = _username
         )
+        val enriched = withGroupSnapshot(message, groupId)
         scope.launch {
             val targets = getGroupMemberTargets(groupId)
-            if (targets.isNotEmpty()) networkManager?.sendToMultiple(message, targets)
+            if (targets.isNotEmpty()) networkManager?.sendToMultiple(enriched, targets)
             addMessageToHistory(message)
         }
     }
@@ -640,9 +663,10 @@ class LanChatService : Disposable {
             content = localCopy.absolutePath, fileName = file.name,
             fileSize = file.length(), fileData = bytes, groupId = groupId, senderName = _username
         )
+        val enriched = withGroupSnapshot(message, groupId)
         scope.launch {
             val targets = getGroupMemberTargets(groupId)
-            if (targets.isNotEmpty()) networkManager?.sendToMultiple(message, targets)
+            if (targets.isNotEmpty()) networkManager?.sendToMultiple(enriched, targets)
             addMessageToHistory(message.copy(fileData = null))
         }
     }
@@ -657,9 +681,10 @@ class LanChatService : Disposable {
             content = localCopy.absolutePath, fileName = fileName,
             fileSize = file.length(), fileData = bytes, groupId = groupId, senderName = _username
         )
+        val enriched = withGroupSnapshot(message, groupId)
         scope.launch {
             val targets = getGroupMemberTargets(groupId)
-            if (targets.isNotEmpty()) networkManager?.sendToMultiple(message, targets)
+            if (targets.isNotEmpty()) networkManager?.sendToMultiple(enriched, targets)
             addMessageToHistory(message.copy(fileData = null))
         }
     }
@@ -676,9 +701,10 @@ class LanChatService : Disposable {
             mentionAll = mentionAll, groupId = groupId, senderName = _username
         )
         if (groupId != null) {
+            val enriched = withGroupSnapshot(msg, groupId)
             scope.launch {
                 val targets = getGroupMemberTargets(groupId)
-                if (targets.isNotEmpty()) networkManager?.sendToMultiple(msg, targets)
+                if (targets.isNotEmpty()) networkManager?.sendToMultiple(enriched, targets)
                 addMessageToHistory(msg)
             }
         } else {
@@ -879,10 +905,11 @@ class LanChatService : Disposable {
             senderName = _username
         )
         addMessageToHistory(systemNotice)
+        val enrichedNotice = withGroupSnapshot(systemNotice, groupId)
         scope.launch {
             val allTargets = getGroupMemberTargets(groupId)
             if (allTargets.isNotEmpty()) {
-                networkManager?.sendToMultiple(systemNotice, allTargets)
+                networkManager?.sendToMultiple(enrichedNotice, allTargets)
             }
         }
         return true
@@ -919,9 +946,10 @@ class LanChatService : Disposable {
         )
         addMessageToHistory(sysMsg)
         notifyMessageListeners(sysMsg)
+        val enrichedSysMsg = withGroupSnapshot(sysMsg, groupId)
         scope.launch {
             if (remainingTargets.isNotEmpty()) {
-                networkManager?.sendToMultiple(sysMsg, remainingTargets)
+                networkManager?.sendToMultiple(enrichedSysMsg, remainingTargets)
             }
         }
         return true
@@ -964,7 +992,8 @@ class LanChatService : Disposable {
             action = "MUTE_UPDATE", groupId = groupId,
             mutedMembers = group.mutedMembers.toMap(), globalMute = group.globalMute
         ), targets)
-        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(sysMsg, targets) }
+        val enrichedSysMsg = withGroupSnapshot(sysMsg, groupId)
+        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(enrichedSysMsg, targets) }
     }
 
     fun unmuteUser(groupId: String, memberId: String) {
@@ -989,7 +1018,8 @@ class LanChatService : Disposable {
             action = "MUTE_UPDATE", groupId = groupId,
             mutedMembers = group.mutedMembers.toMap(), globalMute = group.globalMute
         ), targets)
-        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(sysMsg, targets) }
+        val enrichedSysMsg2 = withGroupSnapshot(sysMsg, groupId)
+        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(enrichedSysMsg2, targets) }
     }
 
     fun setGlobalMute(groupId: String, muted: Boolean) {
@@ -1014,7 +1044,8 @@ class LanChatService : Disposable {
             action = "MUTE_UPDATE", groupId = groupId,
             mutedMembers = updated.mutedMembers.toMap(), globalMute = updated.globalMute
         ), targets)
-        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(sysMsg, targets) }
+        val enrichedSysMsg3 = withGroupSnapshot(sysMsg, groupId)
+        scope.launch { if (targets.isNotEmpty()) networkManager?.sendToMultiple(enrichedSysMsg3, targets) }
     }
 
     private fun formatMuteDuration(durationMs: Long): String {
@@ -1423,9 +1454,10 @@ class LanChatService : Disposable {
             groupId = groupId
         )
 
+        val enrichedLeave = withGroupSnapshot(message, groupId)
         scope.launch {
             if (targets.isNotEmpty()) {
-                networkManager?.sendToMultiple(message, targets)
+                networkManager?.sendToMultiple(enrichedLeave, targets)
             }
         }
 
@@ -1795,7 +1827,8 @@ class LanChatService : Disposable {
     private fun isGroupMessage(message: Message): Boolean {
         return message.type == MessageType.GROUP_CHAT ||
                message.type == MessageType.MENTION_MEMBER ||
-               message.type == MessageType.MENTION_ALL
+               message.type == MessageType.MENTION_ALL ||
+               (message.type == MessageType.SYSTEM && !message.groupId.isNullOrEmpty())
     }
 
     private fun isMemberOfGroup(groupId: String?): Boolean {
@@ -1803,6 +1836,58 @@ class LanChatService : Disposable {
         val group = _groups.value[groupId] ?: return false
         val userId = _currentUser?.id ?: return false
         return group.isMember(userId)
+    }
+
+    /**
+     * 自愈机制：从群消息携带的成员快照中恢复群信息
+     * 当用户因 GROUP_SYNC 丢失等原因不在本地群列表中，但实际仍是群成员时触发
+     * @return true 如果成功自愈（用户在成员快照中）
+     */
+    private fun trySelfHealGroup(message: Message): Boolean {
+        val myId = _currentUser?.id ?: return false
+        val groupId = message.groupId ?: return false
+
+        // 检查成员快照是否包含自己
+        if (message.groupMemberIds.isEmpty() || !message.groupMemberIds.contains(myId)) {
+            return false
+        }
+
+        // 如果群已经存在但成员列表过期，更新成员列表
+        val existingGroup = _groups.value[groupId]
+        if (existingGroup != null) {
+            val updated = existingGroup.copy(memberIds = message.groupMemberIds.toMutableList())
+            val m = _groups.value.toMutableMap()
+            m[groupId] = updated
+            _groups.value = m
+            DatabaseManager.saveGroup(updated)
+            return true
+        }
+
+        // 群不存在，从快照重建群信息
+        val group = Group(
+            id = groupId,
+            name = message.groupName ?: "群聊",
+            ownerId = message.senderId, // 发送者可能是群主，后续 GROUP_SYNC 会更新
+            memberIds = message.groupMemberIds.toMutableList(),
+            groupNumber = ""
+        )
+        val m = _groups.value.toMutableMap()
+        m[groupId] = group
+        _groups.value = m
+        DatabaseManager.saveGroup(group)
+
+        // 添加发送者为 peer（如果不存在）
+        if (_peers.value[message.senderId] == null && message.senderName != null) {
+            addPeer(Peer(
+                id = message.senderId,
+                username = message.senderName,
+                ipAddress = "unknown",
+                port = 8889,
+                isOnline = true
+            ))
+        }
+
+        return true
     }
 
     private fun autoAcceptFriendRequests(peer: Peer) {
