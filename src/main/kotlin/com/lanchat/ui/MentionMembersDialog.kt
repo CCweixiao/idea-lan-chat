@@ -75,6 +75,14 @@ class MentionMembersDialog(
             }
         }
         memberList.selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
+        memberList.addKeyListener(object : java.awt.event.KeyAdapter() {
+            override fun keyPressed(e: java.awt.event.KeyEvent) {
+                if (e.keyCode == java.awt.event.KeyEvent.VK_ENTER) {
+                    e.consume()
+                    close(OK_EXIT_CODE)
+                }
+            }
+        })
 
         return JPanel(BorderLayout(0, 12)).apply {
             border = JBUI.Borders.empty(16)
