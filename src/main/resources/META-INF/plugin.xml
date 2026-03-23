@@ -1,6 +1,10 @@
 <idea-plugin>
     <id>com.lanchat.idea-lan-chat</id>
     <name>LAN Chat</name>
+    <version>1.2.2</version>
+    <idea-version since-build="223" until-build="253.*"/>
+    <version>1.2.3</version>
+    <idea-version since-build="223" until-build="253.*"/>
     <vendor email="leojie@apache.org" url="https://github.com/CCweixiao/idea-lan-chat">leojie</vendor>
 
     <license>Apache 2.0</license>
@@ -30,6 +34,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h2>1.2.3</h2>
+    <ul>
+        <li>🐛 修复低版本 IDEA (2024.3) 插件描述符无效的问题</li>
+        <li>📝 在 plugin.xml 中显式声明 version 和 idea-version 标签</li>
+    </ul>
     <h2>1.2.2</h2>
     <ul>
         <li>🐛 修复低版本 IDEA 插件描述符无效的问题</li>
