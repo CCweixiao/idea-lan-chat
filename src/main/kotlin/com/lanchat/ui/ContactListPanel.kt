@@ -39,7 +39,7 @@ class ContactListPanel(
     }
     private val scrollPane: JBScrollPane
     private val statusLabel = JLabel()
-    private val nicknameLabel = JLabel()
+    private val nicknameLabel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply { isOpaque = false }
     private val searchField = PlaceholderTextField("搜索联系人/群聊")
 
     private var groupItems = mutableListOf<ChatItem.GroupItem>()
@@ -91,8 +91,7 @@ class ContactListPanel(
                 }
                 add(titleLabel, BorderLayout.NORTH)
                 nicknameLabel.apply {
-                    text = "${service.username} · ${service.localIp}"
-                    font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
+                    updateNicknameLabel()
                 }
                 add(nicknameLabel, BorderLayout.SOUTH)
             }
@@ -389,6 +388,39 @@ class ContactListPanel(
 
     // =============== Data & Rebuild ===============
 
+    private fun updateNicknameLabel() {
+        nicknameLabel.removeAll()
+        nicknameLabel.add(JLabel("${service.username} · ").apply {
+            font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
+        })
+        nicknameLabel.add(JLabel(service.localIp).apply {
+            font = SUB_FONT; foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
+            cursor = Cursor(Cursor.HAND_CURSOR)
+            toolTipText = "点击复制 IP 地址"
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    val clipboard = Toolkit.getDefaultToolkit().systemClipboard
+                    clipboard.setContents(java.awt.datatransfer.StringSelection(service.localIp), null)
+                    text = "${service.localIp} ✓"
+                    cursor = Cursor(Cursor.DEFAULT_CURSOR)
+                    scope.launch {
+                        kotlinx.coroutines.delay(1500)
+                        SwingUtilities.invokeLater {
+                            text = service.localIp
+                            cursor = Cursor(Cursor.HAND_CURSOR)
+                        }
+                    }
+                }
+                override fun mouseEntered(e: java.awt.event.MouseEvent) {
+                    foreground = JBColor(ACCENT_GREEN.brighter(), ThemeManager.onlineColor.brighter())
+                }
+                override fun mouseExited(e: java.awt.event.MouseEvent) {
+                    foreground = JBColor(ACCENT_GREEN, ThemeManager.onlineColor)
+                }
+            })
+        })
+    }
+
     private fun observeData() {
         scope.launch { service.peers.collect { updateData() } }
         scope.launch { service.groups.collectLatest { updateData() } }
@@ -398,7 +430,7 @@ class ContactListPanel(
 
     private fun updateData() {
         SwingUtilities.invokeLater {
-            nicknameLabel.text = "${service.username} · ${service.localIp}"
+            updateNicknameLabel()
             groupItems.clear()
             peerItems.clear()
             service.groups.value.values.sortedByDescending { it.createdAt }.forEach {
