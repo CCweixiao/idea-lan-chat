@@ -38,6 +38,7 @@ class NetworkManager(
     var currentUserId: String = UUID.randomUUID().toString()
         private set
     private var currentUsername: String = "Anonymous"
+    private var currentAvatarHash: String? = null
     private var isRunning = false
     private var lastLocalIp: String = ""  // 上次检测到的本地 IP，用于检测 IP 变化
 
@@ -114,7 +115,7 @@ class NetworkManager(
                         username = discoveryMsg.username,
                         ipAddress = packet.address.hostAddress ?: continue,
                         port = discoveryMsg.tcpPort,
-                        avatar = discoveryMsg.avatar
+                        avatarHash = discoveryMsg.avatarHash
                     )
                     _peerDiscovered.emit(peer)
                 }
@@ -278,7 +279,8 @@ class NetworkManager(
             val discoveryMsg = DiscoveryMessage(
                 userId = currentUserId,
                 username = currentUsername,
-                tcpPort = serverSocket?.localPort ?: tcpPort
+                tcpPort = serverSocket?.localPort ?: tcpPort,
+                avatarHash = currentAvatarHash
             )
             val json = gson.toJson(discoveryMsg)
             val encrypted = encryptJson(json)
@@ -382,6 +384,15 @@ class NetworkManager(
 
     fun updateUsername(newUsername: String) {
         currentUsername = newUsername
+    }
+
+    fun updateAvatarHash(avatarPath: String?) {
+        currentAvatarHash = if (avatarPath != null) {
+            try {
+                val bytes = java.io.File(avatarPath).readBytes()
+                java.security.MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it) }
+            } catch (_: Exception) { null }
+        } else null
     }
 
     fun updateUserId(newUserId: String) {

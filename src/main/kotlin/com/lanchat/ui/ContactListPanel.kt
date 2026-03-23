@@ -257,7 +257,7 @@ class ContactListPanel(
                 nameText = peer.username
                 subText = if (isAssistant) "本地文件存储" else peer.ipAddress
                 avatarPanel = if (isAssistant) createAvatarPanel("📁", false, Color(64, 158, 255))
-                    else createAvatarPanel(peer.username.firstOrNull()?.toString() ?: "?", false)
+                    else createAvatarPanel(peer.username.firstOrNull()?.toString() ?: "?", false, null, peer.avatar)
             }
         }
 
@@ -350,9 +350,18 @@ class ContactListPanel(
         return panel
     }
 
-    private fun createAvatarPanel(initial: String, isGroup: Boolean, colorOverride: Color? = null): JPanel {
+    private fun createAvatarPanel(initial: String, isGroup: Boolean, colorOverride: Color? = null, avatarPath: String? = null): JPanel {
         val peerColors = ThemeManager.avatarColors
         val groupColor = ThemeManager.groupIconColor
+        var cachedAvatar: java.awt.Image? = null
+        if (avatarPath != null) {
+            try {
+                val f = java.io.File(avatarPath)
+                if (f.exists()) {
+                    cachedAvatar = javax.imageio.ImageIO.read(f)
+                }
+            } catch (_: Exception) {}
+        }
 
         return object : JPanel() {
             override fun paintComponent(g: Graphics) {
@@ -363,22 +372,29 @@ class ContactListPanel(
                 val x = (width - size) / 2
                 val y = (height - size) / 2
 
-                if (isGroup) {
-                    g2d.color = colorOverride ?: groupColor
-                    g2d.fillRoundRect(x, y, size, size, 10, 10)
+                if (cachedAvatar != null) {
+                    // 绘制圆形头像图片
+                    g2d.setClip(java.awt.geom.Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
+                    g2d.drawImage(cachedAvatar.getScaledInstance(size, size, java.awt.Image.SCALE_SMOOTH), x, y, null)
+                    g2d.setClip(null)
                 } else {
-                    val color = colorOverride ?: peerColors[Math.abs(initial.hashCode()) % peerColors.size]
-                    g2d.color = color
-                    g2d.fill(Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
-                }
+                    if (isGroup) {
+                        g2d.color = colorOverride ?: groupColor
+                        g2d.fillRoundRect(x, y, size, size, 10, 10)
+                    } else {
+                        val color = colorOverride ?: peerColors[Math.abs(initial.hashCode()) % peerColors.size]
+                        g2d.color = color
+                        g2d.fill(Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
+                    }
 
-                g2d.color = Color.WHITE
-                g2d.font = Font("Microsoft YaHei", Font.BOLD, size * 2 / 5)
-                val fm = g2d.fontMetrics
-                g2d.drawString(initial,
-                    x + (size - fm.stringWidth(initial)) / 2,
-                    y + (size + fm.ascent - fm.descent) / 2
-                )
+                    g2d.color = Color.WHITE
+                    g2d.font = Font("Microsoft YaHei", Font.BOLD, size * 2 / 5)
+                    val fm = g2d.fontMetrics
+                    g2d.drawString(initial,
+                        x + (size - fm.stringWidth(initial)) / 2,
+                        y + (size + fm.ascent - fm.descent) / 2
+                    )
+                }
             }
         }.apply {
             isOpaque = false

@@ -22,7 +22,8 @@ enum class MessageType {
     MESSAGE_READ_ACK,    // 群消息已读回执
     PROBE,               // 探测请求
     PROBE_RESPONSE,      // 探测响应
-    PROFILE_UPDATE       // 个人信息更新广播
+    PROFILE_UPDATE,      // 个人信息更新广播
+    AVATAR_REQUEST       // 请求对方发送头像
 }
 
 /**

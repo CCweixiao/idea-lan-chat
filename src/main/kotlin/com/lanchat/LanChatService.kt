@@ -155,6 +155,7 @@ class LanChatService : Disposable {
         scope.launch {
             networkManager?.let { nm ->
                 nm.start(_username, userId)
+                nm.updateAvatarHash(_userAvatar)
 
                 val actualPort = nm.getActualTcpPort()
                 if (actualPort != settings.getTcpPort()) {
@@ -301,6 +302,7 @@ class LanChatService : Disposable {
             MessageType.GROUP_INVITE -> handleGroupInvite(message)
             MessageType.GROUP_INVITE_RESPONSE -> handleGroupInviteResponse(message)
             MessageType.PROFILE_UPDATE -> handleProfileUpdate(message)
+            MessageType.AVATAR_REQUEST -> handleAvatarRequest(message)
             MessageType.MESSAGE_READ_ACK -> {
                 // 已关闭群消息回执功能：忽略回执消息
             }
@@ -429,11 +431,43 @@ class LanChatService : Disposable {
             isOnline = true,
             lastSeen = System.currentTimeMillis(),
             // 保留已有的签名等信息
-            signature = existing?.signature ?: peer.signature
+            signature = existing?.signature ?: peer.signature,
+            // 保留已有的本地头像路径
+            avatar = existing?.avatar ?: peer.avatar
         )
         currentPeers[peer.id] = updatedPeer
         _peers.value = currentPeers
         DatabaseManager.savePeer(updatedPeer)
+
+        // 如果对方的 avatarHash 与本地缓存的头像不一致，请求头像
+        val localHash = computeAvatarHash(updatedPeer.avatar)
+        val remoteHash = peer.avatarHash
+        if (remoteHash != null && remoteHash != localHash) {
+            requestAvatar(peer.id, peer.ipAddress, peer.port)
+        }
+    }
+
+    private fun computeAvatarHash(avatarPath: String?): String? {
+        if (avatarPath == null) return null
+        return try {
+            val bytes = java.io.File(avatarPath).readBytes()
+            java.security.MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) { null }
+    }
+
+    private fun requestAvatar(peerId: String, ip: String, port: Int) {
+        scope.launch {
+            try {
+                val msg = Message(
+                    type = MessageType.AVATAR_REQUEST,
+                    senderId = _currentUser?.id ?: return@launch,
+                    receiverId = peerId,
+                    content = "avatar_request",
+                    senderName = _username
+                )
+                networkManager?.sendMessage(msg, ip, port)
+            } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -1541,6 +1575,32 @@ class LanChatService : Disposable {
 
     // =============== User Settings ===============
 
+    private fun handleAvatarRequest(message: Message) {
+        // 收到头像请求时，发送自己的头像
+        val senderId = message.senderId
+        val peer = _peers.value.values.find { it.id == senderId } ?: return
+        if (_userAvatar != null) {
+            scope.launch {
+                try {
+                    val avatarFile = java.io.File(_userAvatar!!)
+                    if (!avatarFile.exists()) return@launch
+                    val avatarBytes = avatarFile.readBytes()
+                    val msg = Message(
+                        type = MessageType.PROFILE_UPDATE,
+                        senderId = _currentUser?.id ?: return@launch,
+                        receiverId = senderId,
+                        content = "",
+                        senderName = _username,
+                        fileName = avatarFile.name,
+                        fileSize = avatarBytes.size.toLong(),
+                        fileData = avatarBytes
+                    )
+                    networkManager?.sendMessage(msg, peer.ipAddress, peer.port)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     fun updateUsername(newUsername: String) {
         _username = newUsername
         networkManager?.updateUsername(newUsername)
@@ -1911,6 +1971,7 @@ class LanChatService : Disposable {
         _userAvatar = avatarPath
         _currentUser = _currentUser?.copy(avatar = avatarPath)
         DatabaseManager.saveSetting("userAvatar", avatarPath)
+        networkManager?.updateAvatarHash(avatarPath)
     }
 
     fun broadcastProfileUpdate() {

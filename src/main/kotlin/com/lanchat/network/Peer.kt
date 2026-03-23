@@ -9,6 +9,7 @@ data class Peer(
     val ipAddress: String,
     val port: Int,
     val avatar: String? = null,
+    val avatarHash: String? = null,
     val signature: String? = null,
     val isOnline: Boolean = true,
     val lastSeen: Long = System.currentTimeMillis()

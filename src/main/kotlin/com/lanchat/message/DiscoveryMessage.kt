@@ -8,6 +8,6 @@ data class DiscoveryMessage(
     val userId: String,
     val username: String,
     val tcpPort: Int,
-    val avatar: String? = null,
+    val avatarHash: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )

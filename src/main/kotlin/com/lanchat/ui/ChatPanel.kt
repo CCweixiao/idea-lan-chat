@@ -1032,7 +1032,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun createMessageRow(message: Message): JPanel {
         val isSentByMe = message.senderId == service.currentUser?.id
         val senderName = message.senderName ?: if (isSentByMe) service.username else "未知用户"
-        val avatarPath = if (isSentByMe) service.userAvatar else null
+        val avatarPath = if (isSentByMe) service.userAvatar else service.peers.value[message.senderId]?.avatar
         val isGroupChat = currentGroup != null
 
         val avatarSize = 36
