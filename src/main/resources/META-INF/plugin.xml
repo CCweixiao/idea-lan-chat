@@ -30,6 +30,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+    <h2>1.2.2</h2>
+    <ul>
+        <li>🐛 修复低版本 IDEA 插件描述符无效的问题</li>
+        <li>📦 升级 IntelliJ Gradle Plugin 到 1.17.4</li>
+    </ul>
     <h2>1.2.1</h2>
     <ul>
         <li>✨ 优化好友列表标题，添加头像图标</li>

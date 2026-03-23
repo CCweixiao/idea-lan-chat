@@ -3,7 +3,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "1.9.21"
-    id("org.jetbrains.intellij") version "1.16.1"
+    id("org.jetbrains.intellij") version "1.17.4"
 }
 
 group = providers.gradleProperty("pluginGroup").get()
@@ -52,6 +52,11 @@ dependencies {
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+// 禁用 instrument 任务，避免生成 instrumented jar 导致低版本 IDEA 不兼容
+tasks.named("instrumentCode") {
+    enabled = false
 }
 
 kotlin {
