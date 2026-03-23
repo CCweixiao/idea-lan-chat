@@ -430,16 +430,21 @@ class LanChatService : Disposable {
         val updatedPeer = peer.copy(
             isOnline = true,
             lastSeen = System.currentTimeMillis(),
-            // 保留已有的签名等信息
             signature = existing?.signature ?: peer.signature,
-            // 保留已有的本地头像路径
             avatar = existing?.avatar ?: peer.avatar
         )
+        // 仅在有意义的字段变化时才更新 StateFlow（避免心跳频繁触发 UI 重建）
+        val hasChange = existing == null
+            || existing.username != updatedPeer.username
+            || existing.isOnline != updatedPeer.isOnline
+            || existing.avatar != updatedPeer.avatar
+            || existing.signature != updatedPeer.signature
         currentPeers[peer.id] = updatedPeer
-        _peers.value = currentPeers
+        if (hasChange) {
+            _peers.value = currentPeers
+        }
         DatabaseManager.savePeer(updatedPeer)
 
-        // 如果对方的 avatarHash 与本地缓存的头像不一致，请求头像
         val localHash = computeAvatarHash(updatedPeer.avatar)
         val remoteHash = peer.avatarHash
         if (remoteHash != null && remoteHash != localHash) {

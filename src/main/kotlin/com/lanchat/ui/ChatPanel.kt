@@ -40,6 +40,9 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private val service = LanChatService.getInstance()
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    // 头像缓存
+    private val avatarImageCache = java.util.concurrent.ConcurrentHashMap<String, java.awt.Image>()
+    private val avatarIconCache = java.util.concurrent.ConcurrentHashMap<String, Icon>()
 
     private val messagePanel: JPanel
     private val messageScrollPane: JBScrollPane
@@ -1303,7 +1306,17 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun createAvatarIcon(avatarPath: String?, name: String, size: Int = 36): Icon {
         if (avatarPath != null) {
-            try { val f = File(avatarPath); if (f.exists()) return ImageIcon(ImageIO.read(f).getScaledInstance(size, size, Image.SCALE_SMOOTH)) } catch (_: Exception) {}
+            val cacheKey = "${avatarPath}_$size"
+            avatarIconCache[cacheKey]?.let { return it }
+            try {
+                val f = File(avatarPath)
+                if (f.exists()) {
+                    val img = avatarImageCache.getOrPut(avatarPath) { ImageIO.read(f) }
+                    val icon = ImageIcon(img.getScaledInstance(size, size, Image.SCALE_SMOOTH))
+                    avatarIconCache[cacheKey] = icon
+                    return icon
+                }
+            } catch (_: Exception) {}
         }
         return createInitialAvatar(name.firstOrNull()?.toString() ?: "?", size)
     }

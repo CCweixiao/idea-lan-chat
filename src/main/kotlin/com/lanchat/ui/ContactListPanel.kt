@@ -32,6 +32,8 @@ class ContactListPanel(
 
     private val service = LanChatService.getInstance()
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    // 头像图片缓存
+    private val avatarImageCache = java.util.concurrent.ConcurrentHashMap<String, java.awt.Image>()
 
     private val contentPanel = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
@@ -353,14 +355,18 @@ class ContactListPanel(
     private fun createAvatarPanel(initial: String, isGroup: Boolean, colorOverride: Color? = null, avatarPath: String? = null): JPanel {
         val peerColors = ThemeManager.avatarColors
         val groupColor = ThemeManager.groupIconColor
-        var cachedAvatar: java.awt.Image? = null
-        if (avatarPath != null) {
-            try {
-                val f = java.io.File(avatarPath)
-                if (f.exists()) {
-                    cachedAvatar = javax.imageio.ImageIO.read(f)
-                }
-            } catch (_: Exception) {}
+        val avatarSize = 44
+        // 预缩放缓存
+        val scaledAvatar = avatarPath?.let { path ->
+            val cacheKey = "${path}_$avatarSize"
+            avatarImageCache.getOrPut(cacheKey) {
+                try {
+                    val f = java.io.File(path)
+                    if (f.exists()) {
+                        javax.imageio.ImageIO.read(f).getScaledInstance(avatarSize, avatarSize, java.awt.Image.SCALE_SMOOTH)
+                    } else null
+                } catch (_: Exception) { null }
+            }
         }
 
         return object : JPanel() {
@@ -372,10 +378,9 @@ class ContactListPanel(
                 val x = (width - size) / 2
                 val y = (height - size) / 2
 
-                if (cachedAvatar != null) {
-                    // 绘制圆形头像图片
+                if (scaledAvatar != null) {
                     g2d.setClip(java.awt.geom.Ellipse2D.Double(x.toDouble(), y.toDouble(), size.toDouble(), size.toDouble()))
-                    g2d.drawImage(cachedAvatar.getScaledInstance(size, size, java.awt.Image.SCALE_SMOOTH), x, y, null)
+                    g2d.drawImage(scaledAvatar, x, y, null)
                     g2d.setClip(null)
                 } else {
                     if (isGroup) {
@@ -442,6 +447,19 @@ class ContactListPanel(
         scope.launch { service.groups.collectLatest { updateData() } }
         scope.launch { service.unreadCounts.collectLatest { updateData() } }
         scope.launch { service.pinnedIds.collectLatest { SwingUtilities.invokeLater { rebuildList() } } }
+    }
+
+    // 防抖：避免心跳（每5秒）频繁触发全量重建
+    @Volatile
+    private var pendingUpdate = false
+    private fun scheduleUpdate() {
+        if (pendingUpdate) return
+        pendingUpdate = true
+        scope.launch {
+            kotlinx.coroutines.delay(300)
+            pendingUpdate = false
+            updateData()
+        }
     }
 
     private fun updateData() {
