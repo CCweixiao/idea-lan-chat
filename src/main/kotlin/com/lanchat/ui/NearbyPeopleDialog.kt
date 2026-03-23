@@ -315,7 +315,7 @@ class NearbyPeopleDialog(private val project: Project) : JDialog() {
     }
 
     override fun show() {
-        isVisible = true
+        super.show()
     }
 
     override fun dispose() {
