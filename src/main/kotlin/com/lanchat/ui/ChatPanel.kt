@@ -494,7 +494,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun loadChatHistory(chatId: String, lastReadAt: Long = 0L) {
         messagePanel.removeAll(); lastDisplayedTimestamp = 0
-        val messages = service.getChatHistory(chatId)
+        val messages = service.getChatHistory(chatId).toList()
         var unreadDivider: JPanel? = null
         if (messages.isEmpty()) {
             messagePanel.add(JPanel(GridBagLayout()).apply {
@@ -590,7 +590,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             return
         }
 
-        val messages = service.getChatHistory(chatId)
+        val messages = service.getChatHistory(chatId).toList()
         if (messages.isEmpty()) {
             JOptionPane.showMessageDialog(this, "暂无聊天记录", "聊天记录", JOptionPane.INFORMATION_MESSAGE)
             return
