@@ -1,7 +1,9 @@
 package com.lanchat.ui
 
 import com.intellij.ui.JBColor
+import com.lanchat.ui.settings.LanChatSettings
 import java.awt.Color
+import java.awt.Font
 
 /**
  * 主题管理器 - 自动适配 IDEA 主题，暗色模式使用低调配色
@@ -17,7 +19,16 @@ object ThemeManager {
         DARK("暗色")
     }
 
+    /** 字体大小预设 */
+    enum class FontSize(val label: String, val size: Int) {
+        SMALL("小 (12px)", 12),
+        MEDIUM("中 (14px)", 14),
+        LARGE("大 (16px)", 16),
+        XLARGE("特大 (18px)", 18)
+    }
+
     private var currentTheme: Theme = Theme.LIGHT
+    private var baseFontSize: Int = 14
 
     fun setTheme(theme: Theme) {
         currentTheme = theme
@@ -26,6 +37,19 @@ object ThemeManager {
     fun getTheme(): Theme = currentTheme
 
     fun isDark(): Boolean = currentTheme == Theme.DARK
+
+    fun setBaseFontSize(size: Int) {
+        baseFontSize = size
+    }
+
+    fun getBaseFontSize(): Int = baseFontSize
+
+    /** 基于基础字号生成字体 */
+    fun plainFont(sizeOffset: Int = 0): Font =
+        Font("Microsoft YaHei", Font.PLAIN, baseFontSize + sizeOffset)
+
+    fun boldFont(sizeOffset: Int = 0): Font =
+        Font("Microsoft YaHei", Font.BOLD, baseFontSize + sizeOffset)
 
     // =============== 通用颜色（跟随 IDEA 原生主题）===============
 

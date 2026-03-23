@@ -68,7 +68,7 @@ class MentionMembersDialog(
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
                 if (value is Peer) {
                     text = "${value.username}  (${value.ipAddress})"
-                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    font = ThemeManager.plainFont(-1)
                     border = JBUI.Borders.empty(4, 8)
                 }
                 return this
@@ -90,7 +90,7 @@ class MentionMembersDialog(
 
             val topPanel = JPanel(BorderLayout()).apply {
                 add(JLabel("选择要@的成员：").apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    font = ThemeManager.plainFont(-1)
                 }, BorderLayout.WEST)
             }
             add(topPanel, BorderLayout.NORTH)
@@ -107,7 +107,7 @@ class MentionMembersDialog(
                 border = JBUI.Borders.emptyTop(8)
                 
                 mentionAllCheckBox.apply {
-                    font = font.deriveFont(Font.BOLD)
+                    font = ThemeManager.boldFont()
                     addActionListener {
                         memberList.isEnabled = !isSelected
                         if (isSelected) {
@@ -120,7 +120,7 @@ class MentionMembersDialog(
                 // 提示
                 add(JLabel("提示：按住 Ctrl 可多选").apply {
                     foreground = JBColor.GRAY
-                    font = font.deriveFont(11f)
+                    font = ThemeManager.boldFont(-3)
                 }, BorderLayout.SOUTH)
             }
             add(bottomPanel, BorderLayout.SOUTH)

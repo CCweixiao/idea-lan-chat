@@ -72,10 +72,10 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         private const val SEND_RATE_LIMIT_MS = 500L
         private const val MAX_IMAGE_SIZE = 10L * 1024 * 1024
         private const val MAX_FILE_SIZE = 100L * 1024 * 1024
-        private val MSG_FONT = Font("Microsoft YaHei", Font.PLAIN, 14)
-        private val NAME_FONT = Font("Microsoft YaHei", Font.PLAIN, 11)
-        private val TIME_FONT = Font("Microsoft YaHei", Font.PLAIN, 10)
-        private val MENTION_FONT = Font("Microsoft YaHei", Font.BOLD, 12)
+        private val MSG_FONT get() = ThemeManager.plainFont()
+        private val NAME_FONT get() = ThemeManager.plainFont(-3)
+        private val TIME_FONT get() = ThemeManager.plainFont(-4)
+        private val MENTION_FONT get() = ThemeManager.boldFont(-2)
 
         private val fontMetricsCache: FontMetrics by lazy {
             val bi = BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB)
@@ -135,7 +135,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
         emptyCard.background = ThemeManager.panelBackground
         emptyCard.add(JLabel("选择联系人或群聊开始聊天").apply {
-            font = Font("Microsoft YaHei", Font.PLAIN, 15)
+            font = ThemeManager.boldFont(1)
             foreground = JBColor(Color(170, 170, 170), Color(100, 100, 100))
             horizontalAlignment = SwingConstants.CENTER
         }, BorderLayout.CENTER)
@@ -230,7 +230,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
             val infoPanel = JPanel(BorderLayout(0, 1)).apply {
                 isOpaque = false
-                titleLabel.font = Font("Microsoft YaHei", Font.BOLD, 15)
+                titleLabel.font = ThemeManager.boldFont(1)
                 add(titleLabel, BorderLayout.CENTER)
                 statusLabel.font = NAME_FONT
                 statusLabel.foreground = JBColor.GRAY
@@ -259,7 +259,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     super.paintComponent(g2d)
                 }
             }.apply {
-                font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                font = ThemeManager.plainFont(-2)
                 isBorderPainted = false; isContentAreaFilled = false; isFocusPainted = false
                 foreground = JBColor(Color(100, 100, 100), Color(170, 170, 170))
                 cursor = Cursor(Cursor.HAND_CURSOR); toolTipText = "查看群成员"
@@ -327,7 +327,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                         g2d.drawString(text, tx, ty)
                     }
                 }.apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                    font = ThemeManager.plainFont(-2)
                     background = ThemeManager.sendButtonColor
                     foreground = ThemeManager.sendButtonText
                     isBorderPainted = false; isFocusPainted = false; isOpaque = false
@@ -500,7 +500,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             messagePanel.add(JPanel(GridBagLayout()).apply {
                 isOpaque = false
                 add(JLabel("暂无消息，发送第一条消息吧").apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    font = ThemeManager.plainFont(-1)
                     foreground = JBColor(Color(180, 180, 180), Color(100, 100, 100))
                 })
             })
@@ -571,7 +571,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                         super.paintComponent(g)
                     }
                 }.apply {
-                    font = Font("Microsoft YaHei", Font.PLAIN, 11)
+                    font = ThemeManager.plainFont(-3)
                     foreground = JBColor(Color(220, 70, 70), Color(220, 100, 100))
                     horizontalAlignment = SwingConstants.CENTER
                     isOpaque = false
@@ -616,7 +616,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                         isOpaque = false
                         border = JBUI.Borders.empty(6, 0)
                         add(JLabel(formatTimeSeparator(msg.timestamp)).apply {
-                            font = Font("Microsoft YaHei", Font.PLAIN, 11)
+                            font = ThemeManager.plainFont(-3)
                             foreground = JBColor.GRAY
                         })
                     })
@@ -629,11 +629,11 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                     isOpaque = false
                     border = JBUI.Borders.empty(4, 12)
                     add(JLabel("${msg.senderName ?: "未知"}: ${msg.content}").apply {
-                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        font = ThemeManager.plainFont(-1)
                         foreground = if (isSentByMe) ThemeManager.primaryButtonColor else ThemeManager.primaryTextColor
                     }, BorderLayout.CENTER)
                     add(JLabel(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp))).apply {
-                        font = Font("Microsoft YaHei", Font.PLAIN, 10)
+                        font = ThemeManager.plainFont(-4)
                         foreground = JBColor.GRAY
                     }, BorderLayout.EAST)
                 })
@@ -853,7 +853,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             val sizeText = "${bi.width} × ${bi.height} 像素"
             add(JLabel(sizeText).apply {
                 foreground = JBColor.GRAY
-                font = Font("Microsoft YaHei", Font.PLAIN, 12)
+                font = ThemeManager.plainFont(-2)
                 horizontalAlignment = SwingConstants.CENTER
             }, BorderLayout.SOUTH)
         }
@@ -981,7 +981,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun showToast(msg: String) {
         val toast = JWindow(SwingUtilities.getWindowAncestor(this))
         val label = JLabel(msg, SwingConstants.CENTER).apply {
-            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            font = ThemeManager.plainFont(-1)
             foreground = Color.WHITE; isOpaque = false
             border = JBUI.Borders.empty(8, 18)
         }
@@ -1268,7 +1268,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 val infoPanel = JPanel(BorderLayout(0, 2)).apply {
                     isOpaque = false
                     add(JLabel(fileName).apply {
-                        font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                        font = ThemeManager.plainFont(-1)
                         foreground = ThemeManager.messageTextColor
                     }, BorderLayout.NORTH)
                     if (fileSize.isNotEmpty()) {

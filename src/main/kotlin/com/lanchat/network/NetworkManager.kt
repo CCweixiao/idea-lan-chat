@@ -39,6 +39,7 @@ class NetworkManager(
         private set
     private var currentUsername: String = "Anonymous"
     private var isRunning = false
+    private var lastLocalIp: String = ""  // 上次检测到的本地 IP，用于检测 IP 变化
 
     companion object {
         private const val DISCOVERY_INTERVAL = 5000L
@@ -81,6 +82,7 @@ class NetworkManager(
         scope.launch { startUdpListener() }
         scope.launch { startTcpServer() }
         scope.launch { startDiscovery() }
+        scope.launch { monitorLocalIp() }
     }
 
     private suspend fun startUdpListener() {
@@ -217,6 +219,49 @@ class NetworkManager(
             if (b == '\n'.code) return baos.toByteArray()
             baos.write(b)
         }
+    }
+
+    /**
+     * 监听本地 IP 变化，一旦检测到 IP 改变，立即发送多次广播通知其他设备更新
+     * 用于处理 WiFi/有线切换、VPN 连接等场景
+     */
+    private suspend fun monitorLocalIp() {
+        lastLocalIp = getLocalIpAddress()
+        while (isRunning) {
+            delay(10000L) // 每 10 秒检测一次
+            try {
+                val newIp = getLocalIpAddress()
+                if (newIp != lastLocalIp && newIp != "127.0.0.1") {
+                    lastLocalIp = newIp
+                    // IP 变化后立即连续发送 3 次广播，确保其他设备快速感知
+                    repeat(3) {
+                        sendDiscoveryInternal()
+                        delay(500)
+                    }
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * 获取本地局域网 IP 地址（优先 IPv4，排除回环地址）
+     */
+    private fun getLocalIpAddress(): String {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val ni = interfaces.nextElement()
+                if (ni.isLoopback || !ni.isUp || ni.isVirtual) continue
+                val addresses = ni.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        return addr.hostAddress ?: "127.0.0.1"
+                    }
+                }
+            }
+            "127.0.0.1"
+        } catch (_: Exception) { "127.0.0.1" }
     }
 
     private suspend fun startDiscovery() {

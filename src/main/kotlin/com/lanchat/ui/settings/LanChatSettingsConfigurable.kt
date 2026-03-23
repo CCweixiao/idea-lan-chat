@@ -17,6 +17,7 @@ class LanChatSettingsConfigurable : Configurable {
     private val service = LanChatService.getInstance()
     private var usernameField: JTextField? = null
     private var themeCombo: JComboBox<String>? = null
+    private var fontSizeCombo: JComboBox<String>? = null
     private var udpPortField: JTextField? = null
     private var tcpPortField: JTextField? = null
     private var mainPanel: JPanel? = null
@@ -48,6 +49,20 @@ class LanChatSettingsConfigurable : Configurable {
         }
         themePanel.add(themeCombo)
         panel.add(themePanel)
+
+        // 字体大小设置
+        val fontPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        fontPanel.border = JBUI.Borders.emptyTop(12)
+        fontPanel.add(JLabel("字体大小:"))
+        fontSizeCombo = JComboBox(ThemeManager.FontSize.values().map { it.label }.toTypedArray())
+        val currentFontSize = settings.getFontSize()
+        val currentSizeOption = ThemeManager.FontSize.values().find { it.size == currentFontSize }
+        fontSizeCombo?.selectedItem = currentSizeOption?.label ?: ThemeManager.FontSize.MEDIUM.label
+        fontSizeCombo?.addActionListener {
+            applyFontSizePreview()
+        }
+        fontPanel.add(fontSizeCombo)
+        panel.add(fontPanel)
 
         // 端口设置
         val portPanel = JPanel(FlowLayout(FlowLayout.LEFT))
@@ -85,7 +100,7 @@ class LanChatSettingsConfigurable : Configurable {
         note1.foreground = JBColor.GRAY
         notePanel.add(note1)
         
-        val note2 = JLabel("• 修改用户名和主题后需要重启插件生效")
+        val note2 = JLabel("• 修改字体大小后需要重启插件生效")
         note2.foreground = JBColor.GRAY
         notePanel.add(note2)
 
@@ -105,10 +120,22 @@ class LanChatSettingsConfigurable : Configurable {
         ThemeManager.setTheme(theme)
         settings.setTheme(theme.name)
     }
+
+    private fun applyFontSizePreview() {
+        val label = fontSizeCombo?.selectedItem as? String ?: return
+        val fontSize = ThemeManager.FontSize.values().find { it.label == label } ?: return
+        ThemeManager.setBaseFontSize(fontSize.size)
+        settings.setFontSize(fontSize.size)
+    }
     
     override fun isModified(): Boolean {
+        val currentFontSize = settings.getFontSize()
+        val selectedFontSize = (fontSizeCombo?.selectedItem as? String)?.let { label ->
+            ThemeManager.FontSize.values().find { it.label == label }?.size
+        }
         return usernameField?.text != service.username ||
                themeCombo?.selectedItem != ThemeManager.Theme.valueOf(settings.getTheme()).displayName ||
+               selectedFontSize != currentFontSize ||
                udpPortField?.text?.toIntOrNull() != settings.getUdpPort() ||
                tcpPortField?.text?.toIntOrNull() != settings.getTcpPort()
     }
@@ -120,6 +147,7 @@ class LanChatSettingsConfigurable : Configurable {
             }
         }
         applyThemePreview()
+        applyFontSizePreview()
 
         // 保存端口设置
         udpPortField?.text?.toIntOrNull()?.let {
@@ -138,6 +166,8 @@ class LanChatSettingsConfigurable : Configurable {
         usernameField?.text = service.username
         val currentTheme = try { ThemeManager.Theme.valueOf(settings.getTheme()) } catch (_: Exception) { ThemeManager.Theme.LIGHT }
         themeCombo?.selectedItem = currentTheme.displayName
+        val currentFontSize = ThemeManager.FontSize.values().find { it.size == settings.getFontSize() }
+        fontSizeCombo?.selectedItem = currentFontSize?.label ?: ThemeManager.FontSize.MEDIUM.label
         udpPortField?.text = settings.getUdpPort().toString()
         tcpPortField?.text = settings.getTcpPort().toString()
     }

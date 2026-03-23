@@ -50,10 +50,10 @@ class ContactListPanel(
 
     companion object {
         private val ACCENT_GREEN = Color(7, 193, 96)
-        private val TITLE_FONT = Font("Microsoft YaHei", Font.BOLD, 16)
-        private val SECTION_FONT = Font("Microsoft YaHei", Font.BOLD, 12)
-        private val NAME_FONT = Font("Microsoft YaHei", Font.PLAIN, 14)
-        private val SUB_FONT = Font("Microsoft YaHei", Font.PLAIN, 11)
+        private val TITLE_FONT get() = ThemeManager.boldFont(2)
+        private val SECTION_FONT get() = ThemeManager.boldFont(-2)
+        private val NAME_FONT get() = ThemeManager.plainFont()
+        private val SUB_FONT get() = ThemeManager.plainFont(-3)
     }
 
     init {
@@ -124,7 +124,7 @@ class ContactListPanel(
                 background = JBColor(Color(225, 225, 225), ThemeManager.itemHover)
                 searchField.apply {
                     border = JBUI.Borders.empty(7, 12, 7, 12)
-                    font = Font("Microsoft YaHei", Font.PLAIN, 13)
+                    font = ThemeManager.plainFont(-1)
                     background = JBColor(Color(0, 0, 0, 0), Color(0, 0, 0, 0))
                     isOpaque = false
                     document.addDocumentListener(object : DocumentListener {
@@ -302,7 +302,7 @@ class ContactListPanel(
 
                     // 绘制文字
                     g2d.color = Color.WHITE
-                    g2d.font = Font("Microsoft YaHei", Font.BOLD, 11)
+                    g2d.font = ThemeManager.boldFont(-3)
                     val textX = x + (badgeWidth - textWidth) / 2
                     val textY = y + (badgeHeight + fm.ascent - fm.descent) / 2 - 1
                     g2d.drawString(text, textX, textY)
@@ -538,7 +538,7 @@ class ContactListPanel(
 
     private fun createMenuItem(text: String, color: Color? = null, action: () -> Unit): JMenuItem {
         return JMenuItem(text).apply {
-            font = Font("Microsoft YaHei", Font.PLAIN, 13)
+            font = ThemeManager.plainFont(-1)
             if (color != null) foreground = JBColor(color, color)
             addActionListener { action() }
         }

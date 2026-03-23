@@ -15,7 +15,8 @@ class LanChatSettings : PersistentStateComponent<LanChatSettings.State> {
         var username: String = "",
         var theme: String = ThemeManager.Theme.LIGHT.name,
         var udpPort: Int = 8888,
-        var tcpPort: Int = 8889
+        var tcpPort: Int = 8889,
+        var fontSize: Int = 14
     )
 
     private var state = State()
@@ -29,6 +30,8 @@ class LanChatSettings : PersistentStateComponent<LanChatSettings.State> {
             val theme = ThemeManager.Theme.valueOf(state.theme)
             ThemeManager.setTheme(theme)
         } catch (_: Exception) {}
+        // 恢复字体大小
+        ThemeManager.setBaseFontSize(state.fontSize)
     }
 
     fun getUsername(): String = state.username
@@ -42,4 +45,7 @@ class LanChatSettings : PersistentStateComponent<LanChatSettings.State> {
 
     fun getTcpPort(): Int = state.tcpPort
     fun setTcpPort(port: Int) { state.tcpPort = port }
+
+    fun getFontSize(): Int = state.fontSize
+    fun setFontSize(size: Int) { state.fontSize = size }
 }
