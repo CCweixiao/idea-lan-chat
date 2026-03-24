@@ -167,12 +167,16 @@ class LanChatService : Disposable {
                 nm.peerDiscovered.collect { peer ->
                     // 检查是否在黑名单中，黑名单中的用户不自动添加
                     if (!_blockedPeerIds.value.contains(peer.id)) {
-                        // 检查是否有相同 IP+port 的旧记录（可能是手动添加的临时ID）
+                        // 检查是否有需要合并的旧记录：
+                        // 1) 相同 IP+port（可能是手动添加的临时ID）
+                        // 2) username 相同的 manual 临时ID（对方 IP 变化后，仅靠 IP+port 匹配不上）
                         val existingPeer = _peers.value.values.find {
                             it.ipAddress == peer.ipAddress && it.port == peer.port
+                        } ?: _peers.value.values.find {
+                            it.id.startsWith("manual_") && it.username == peer.username && it.id != peer.id
                         }
                         if (existingPeer != null && existingPeer.id != peer.id) {
-                            // 找到相同 IP+port 但 ID 不同的记录，删除旧记录使用真实 userId
+                            // 找到旧记录，删除并使用真实 userId
                             val m = _peers.value.toMutableMap()
                             m.remove(existingPeer.id)
                             _peers.value = m
@@ -487,11 +491,24 @@ class LanChatService : Disposable {
         // 检查是否已存在（通过 IP+port）
         if (_peers.value.values.any { it.ipAddress == ipAddress && it.port == port }) return false
 
-        // 优先使用真实 userId，如果没有则使用基于 IP+port 的稳定临时 ID
-        val finalUserId = userId ?: "manual_${ipAddress}_${port}".hashCode().toString()
+        // 尝试通过 TCP 探测获取对方的真实 userId
+        var finalUserId = userId
+        var finalName = name
+        if (finalUserId == null) {
+            val probeResult = runBlocking { networkManager.probePeer(ipAddress, port, 3000) }
+            if (probeResult != null) {
+                finalUserId = probeResult.id
+                if (probeResult.username.isNotBlank() && probeResult.username != "未知用户") {
+                    finalName = probeResult.username
+                }
+            }
+        }
+
+        // 如果探测仍然无法获取真实 userId，回退到基于 IP+port 的临时 ID
+        finalUserId = finalUserId ?: "manual_${ipAddress}_${port}".hashCode().toString()
         val peer = Peer(
             id = finalUserId,
-            username = name, ipAddress = ipAddress, port = port, isOnline = true
+            username = finalName, ipAddress = ipAddress, port = port, isOnline = true
         )
         addPeer(peer)
         // 从黑名单中移除（如果存在）
