@@ -91,6 +91,7 @@
                     factoryClass="com.lanchat.ui.LanChatToolWindowFactory"/>
         
         <applicationService serviceImplementation="com.lanchat.LanChatService"/>
+        <applicationService serviceImplementation="com.lanchat.ui.settings.LanChatSettings"/>
         
         <applicationConfigurable parentId="tools"
                                  instance="com.lanchat.ui.settings.LanChatSettingsConfigurable"
