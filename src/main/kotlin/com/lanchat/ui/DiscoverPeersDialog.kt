@@ -87,9 +87,11 @@ class DiscoverPeersDialog(private val project: Project) : DialogWrapper(project)
         val currentUserId = service.currentUser?.id ?: return
         
         // 过滤已添加的好友，只显示新发现的用户
+        // peers 列表中的人已经是好友，全部视为已添加
+        // "附近的人"功能在当前架构下，广播发现即自动添加，无需额外操作
+        // 此对话框作为查看附近在线用户的入口
         service.peers.value.values
-            .filter { it.id != currentUserId } // 排除自己
-            .filter { !service.isPeerExists(it.ipAddress, it.port) || it.id.startsWith("discovered_") } // 只显示未添加的
+            .filter { it.id != currentUserId && it.id != LanChatService.FILE_TRANSFER_ASSISTANT_ID }
             .sortedByDescending { it.isOnline }
             .forEach { peer ->
                 peerListModel.addElement(peer)
@@ -224,12 +226,9 @@ class DiscoverPeersDialog(private val project: Project) : DialogWrapper(project)
             if (sentRequests[peer.id] == true) {
                 addButton.text = "已申请"
                 addButton.isEnabled = false
-            } else if (service.isPeerExists(peer.ipAddress, peer.port)) {
+            } else {
                 addButton.text = "已添加"
                 addButton.isEnabled = false
-            } else {
-                addButton.text = "添加好友"
-                addButton.isEnabled = true
             }
             
             // 选中状态

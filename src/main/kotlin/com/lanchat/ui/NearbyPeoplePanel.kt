@@ -129,15 +129,11 @@ class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
 
         val allPeers = service.peers.value.values.toList()
         val nearbyPeers = allPeers.filter {
-            it.id != myId && it.id != "file_transfer_assistant"
+            it.id != myId && it.id != "file_transfer_assistant" && it.id != LanChatService.FILE_TRANSFER_ASSISTANT_ID
         }
 
-        // 已有好友 = friendRequests 中状态为 ACCEPTED 且来自该 peer 的请求
-        val acceptedPeerIds = service.friendRequests.value.values
-            .filter { it.status.name == "ACCEPTED" }
-            .map { setOf(it.fromUserId, it.toIp) }
-            .flatten()
-            .toSet()
+        // 在 peers 列表中的都视为好友（通过广播发现或手动添加）
+        val friendPeerIds = allPeers.map { it.id }.toSet()
 
         listPanel.removeAll()
 
@@ -165,7 +161,7 @@ class NearbyPeoplePanel(private val project: Project) : JPanel(BorderLayout()) {
 
             sorted.forEach { peer ->
                 val ipPort = "${peer.ipAddress}:${peer.port}"
-                val isAlreadyFriend = acceptedPeerIds.contains(peer.id)
+                val isAlreadyFriend = friendPeerIds.contains(peer.id)
                 val hasPendingRequest = pendingRequestIps.contains(ipPort)
                 val isSelf = peer.ipAddress == myIp
                 listPanel.add(createPeerItem(peer, isAlreadyFriend, hasPendingRequest, isSelf))
