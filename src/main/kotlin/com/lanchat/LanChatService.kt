@@ -128,6 +128,20 @@ class LanChatService : Disposable {
             peer.copy(isOnline = false)
         }.toMutableMap()
         loadedPeers[FILE_TRANSFER_ASSISTANT_ID] = FILE_TRANSFER_ASSISTANT
+        // 默认将自己添加为好友，方便查看自己的状态和消息记录
+        if (!loadedPeers.containsKey(userId)) {
+            loadedPeers[userId] = _currentUser!!.copy(isOnline = true)
+            DatabaseManager.savePeer(_currentUser!!.copy(isOnline = true))
+        } else {
+            // 已存在则更新信息
+            loadedPeers[userId] = loadedPeers[userId]!!.copy(
+                username = _username,
+                ipAddress = _localIp,
+                port = settings.getTcpPort(),
+                isOnline = true
+            )
+            DatabaseManager.savePeer(loadedPeers[userId]!!)
+        }
         _peers.value = loadedPeers
 
         val pinnedRaw = DatabaseManager.getSetting("pinned_ids", "")
