@@ -541,7 +541,7 @@ class LanChatService : Disposable {
         var finalUserId = userId
         var finalName = name
         if (finalUserId == null) {
-            val probeResult = runBlocking { networkManager.probePeer(ipAddress, port, 3000) }
+            val probeResult = runBlocking { networkManager?.probePeer(ipAddress, port, 3000) }
             if (probeResult != null) {
                 finalUserId = probeResult.id
                 if (probeResult.username.isNotBlank() && probeResult.username != "未知用户") {
