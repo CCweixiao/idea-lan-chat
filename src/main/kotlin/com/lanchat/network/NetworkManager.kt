@@ -226,20 +226,67 @@ class NetworkManager(
      * 监听本地 IP 变化，一旦检测到 IP 改变，立即发送多次广播通知其他设备更新
      * 用于处理 WiFi/有线切换、VPN 连接等场景
      */
+    /**
+     * 网络恢复回调，由 LanChatService 监听后主动探测所有好友在线状态
+     */
+    val networkRecovered = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     private suspend fun monitorLocalIp() {
         lastLocalIp = getLocalIpAddress()
+        var wasOnline = lastLocalIp != "127.0.0.1"
+
         while (isRunning) {
             delay(10000L) // 每 10 秒检测一次
             try {
                 val newIp = getLocalIpAddress()
-                if (newIp != lastLocalIp && newIp != "127.0.0.1") {
-                    lastLocalIp = newIp
-                    // IP 变化后立即连续发送 3 次广播，确保其他设备快速感知
-                    repeat(3) {
-                        sendDiscoveryInternal()
-                        delay(500)
+                val isOnline = newIp != "127.0.0.1"
+
+                when {
+                    // 从离线恢复到在线
+                    !wasOnline && isOnline -> {
+                        lastLocalIp = newIp
+                        wasOnline = true
+                        rebuildUdpSocket()
+                        // 立即连续发送 3 次广播，确保其他设备快速感知
+                        repeat(3) {
+                            sendDiscoveryInternal()
+                            delay(500)
+                        }
+                        // 通知上层主动探测好友在线状态
+                        networkRecovered.emit(Unit)
+                    }
+                    // IP 变化（都是在线状态下的变化）
+                    newIp != lastLocalIp && isOnline -> {
+                        lastLocalIp = newIp
+                        rebuildUdpSocket()
+                        repeat(3) {
+                            sendDiscoveryInternal()
+                            delay(500)
+                        }
+                        networkRecovered.emit(Unit)
+                    }
+                    // 刚从在线变为离线
+                    wasOnline && !isOnline -> {
+                        wasOnline = false
+                        lastLocalIp = newIp
                     }
                 }
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * 重建 UDP socket，断网恢复后旧 socket 可能已失效
+     */
+    private fun rebuildUdpSocket() {
+        try {
+            udpSocket?.close()
+        } catch (_: Exception) { }
+        try {
+            udpSocket = DatagramSocket(udpPort).apply { broadcast = true }
+        } catch (_: Exception) {
+            try {
+                udpSocket = DatagramSocket().apply { broadcast = true }
             } catch (_: Exception) { }
         }
     }

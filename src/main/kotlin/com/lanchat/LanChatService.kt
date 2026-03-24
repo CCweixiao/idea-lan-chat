@@ -186,6 +186,13 @@ class LanChatService : Disposable {
                         autoAcceptFriendRequests(peer)
                     }
                 }
+
+                // 网络恢复时主动探测所有好友在线状态
+                launch {
+                    nm.networkRecovered.collect {
+                        probeAllPeers(nm)
+                    }
+                }
             }
         }
 
@@ -203,6 +210,45 @@ class LanChatService : Disposable {
      * 2. 探测成功 → 标记在线，更新 lastSeen
      * 3. 探测失败且超过阈值 → 标记离线
      */
+    /**
+     * 网络恢复时主动探测所有好友的在线状态和最新 IP
+     */
+    private suspend fun probeAllPeers(nm: NetworkManager) {
+        val currentPeers = _peers.value
+        if (currentPeers.isEmpty()) return
+
+        coroutineScope {
+            currentPeers.values
+                .filter { it.id != FILE_TRANSFER_ASSISTANT_ID }
+                .map { peer ->
+                    async(Dispatchers.IO) {
+                        val result = nm.probePeer(peer.ipAddress, peer.port, 3000)
+                        if (result != null) {
+                            // 对方在线，更新信息（IP可能已变）
+                            val updatedPeer = Peer(
+                                id = result.id,
+                                username = result.username,
+                                ipAddress = result.ipAddress,
+                                port = result.port,
+                                isOnline = true,
+                                lastSeen = System.currentTimeMillis(),
+                                avatar = peer.avatar,
+                                signature = peer.signature
+                            )
+                            addPeer(updatedPeer)
+                        } else {
+                            // 探测失败，标记离线
+                            val m = _peers.value.toMutableMap()
+                            m[peer.id]?.let { m[peer.id] = it.copy(isOnline = false) }
+                            _peers.value = m
+                            DatabaseManager.savePeer(m[peer.id] ?: return@async)
+                        }
+                    }
+                }
+                .awaitAll()
+        }
+    }
+
     private fun checkPeerOnlineStatus() {
         val currentPeers = _peers.value
         if (currentPeers.isEmpty()) return
